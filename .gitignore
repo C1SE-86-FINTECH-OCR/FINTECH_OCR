@@ -218,3 +218,38 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Node.js
+node_modules/
+dist/
+build/
+.vite/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded data
+uploads/
+uploads_*/
+test_uploads/
+
+# Temporary and backup files
+*.log
+*.bak
+
+# Secrets
+*.pem
+*.key
