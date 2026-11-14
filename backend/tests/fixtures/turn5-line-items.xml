@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon><DLHDon><TTChung><SHDon>TURN5-XML-LINE-001</SHDon><NLap>2026-11-07</NLap></TTChung>
+<NDHDon><NBan><Ten>XML Test Seller</Ten><MST>0101234567</MST></NBan>
+<NMua><Ten>XML Test Buyer</Ten><MST>0107654321</MST>
+<DSHHDVu><HHDVu><THHDVu>Test service</THHDVu><ThTien>1000</ThTien></HHDVu></DSHHDVu>
+<TToan><TgTCThue>1000</TgTCThue><TgTThue>80</TgTThue><TgTTTBSo>1080</TgTTTBSo></TToan>
+</NMua></NDHDon></DLHDon></HDon>
