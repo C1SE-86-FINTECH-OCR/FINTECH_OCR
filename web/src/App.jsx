@@ -22,10 +22,51 @@ async function submit(e){e.preventDefault();setLoading(true);setError('');try{le
 return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><span className="brand-symbol">◈</span><span>FINTECH<strong>OCR / WORKSPACE</strong></span></div><div><p className="overline">INTERNAL EXPENSE WORKSPACE</p><h1>From paper invoices<br/>to <em>clean data.</em></h1><p>Digitize. Verify. Approve.<br/>Everything your team needs, one workspace.</p></div><div className="login-chips"><span>AI-Assisted OCR</span><span>Approval Workflow</span><span>Finance Analytics</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle">◈</div><small className="eyebrow">WELCOME BACK</small><h2>Log in</h2><p>Access your FINTECH OCR workspace</p><form onSubmit={submit} className="stack"><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?'Signing in...':'Log in to workspace'} <ArrowRight size={17}/></button></form><div className="demo-account"><strong>DEMO ACCOUNTS</strong>{['employee','accountant','admin'].map(role=><button key={role} onClick={()=>{setEmail(role+'@fintech.local');setPassword('Password@123')}}>{roleName(role)}<span>Use account ↗</span></button>)}<small>Password: Password@123 · Chỉ dùng để phát triển</small></div></div></div></div>}
 const common=[['/','Home',Home],['/invoices','My invoices',FileText],['/upload','Upload invoices',FileUp],['/schedule','Schedule',CalendarDays],['/ranking','Ranking',Trophy],['/chat','Chat with AI',MessageSquare],['/notifications','Notifications',Bell],['/profile','Profile',UserCircle]];
 function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/','Home',Home],['/approvals','Approval Queue',ClipboardCheck],['/invoices','All invoices',FileText],['/schedule','Schedule',CalendarDays],['/ranking','Ranking',Trophy],['/chat','Chat with AI',MessageSquare],['/reports','Report',ChartNoAxesCombined],['/notifications','Notifications',Bell],['/profile','Profile',UserCircle]];return [['/','Home',Home],['/approvals','Approval Queue',ClipboardCheck],['/invoices','All invoices',FileText],['/schedule','Schedule',CalendarDays],['/ranking','Ranking',Trophy],['/chat','Chat with AI',MessageSquare],['/reports','Report',ChartNoAxesCombined],['/users','User Management',Users],['/audit','Audit Logs',ShieldCheck],['/notifications','Notifications',Bell],['/profile','Profile',UserCircle]]}
+
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+}
+
+function getNotifConfig(item) {
+  const text = ((item.title || '') + ' ' + (item.message || '')).toLowerCase();
+  if (text.includes('duyệt') || text.includes('phê duyệt') || text.includes('approved')) {
+    return { icon: CheckCircle2, colorClass: 'notif-icon-green', priority: 'Bình thường' };
+  }
+  if (text.includes('chỉnh sửa') || text.includes('từ chối') || text.includes('rejected') || text.includes('needs')) {
+    return { icon: FileText, colorClass: 'notif-icon-red', priority: 'Cao' };
+  }
+  if (item.type === 'extraction_finished' || text.includes('ocr')) {
+    return { icon: Camera, colorClass: 'notif-icon-teal', priority: 'Cao' };
+  }
+  if (item.type === 'schedule_assigned' || text.includes('lịch') || text.includes('công tác')) {
+    return { icon: CalendarDays, colorClass: 'notif-icon-blue', priority: 'Bình thường' };
+  }
+  return { icon: FileUp, colorClass: 'notif-icon-green', priority: 'Bình thường' };
+}
+
+function formatNotifTime(dateString) {
+  if (!dateString) return '—';
+  const d = new Date(dateString);
+  if (Number.isNaN(d.getTime())) return '—';
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const now = new Date();
+  if (isSameDay(d, now)) {
+    return `${hours}:${minutes}`;
+  }
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${d.getDate()} ${months[d.getMonth()]} · ${hours}:${minutes}`;
+}
+
 function Shell({user,onLogout,children}) {
   const [menu,setMenu]=useState(false), n=useNavigate(), loc=useLocation();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const userDropdownRef = useRef(null);
+  const notifDropdownRef = useRef(null);
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const notes=useLoad('/notifications');
   const unreadCountState=useLoad('/notifications/unread-count');
   const previousPath=useRef(loc.pathname);
@@ -49,6 +90,7 @@ function Shell({user,onLogout,children}) {
   useEffect(()=>{
     setMenu(false);
     setUserDropdownOpen(false);
+    setNotifDropdownOpen(false);
     if(previousPath.current!==loc.pathname){notes.reload();unreadCountState.reload();}
     previousPath.current=loc.pathname;
   },[loc.pathname]);
@@ -57,11 +99,17 @@ function Shell({user,onLogout,children}) {
       if(userDropdownRef.current&&!userDropdownRef.current.contains(e.target)){
         setUserDropdownOpen(false);
       }
+      if(notifDropdownRef.current&&!notifDropdownRef.current.contains(e.target)){
+        setNotifDropdownOpen(false);
+      }
     }
     function handleKeyDown(e){
-      if(e.key==='Escape') setUserDropdownOpen(false);
+      if(e.key==='Escape'){
+        setUserDropdownOpen(false);
+        setNotifDropdownOpen(false);
+      }
     }
-    if(userDropdownOpen){
+    if(userDropdownOpen || notifDropdownOpen){
       document.addEventListener('mousedown',handleOutside);
       document.addEventListener('keydown',handleKeyDown);
       return ()=>{
@@ -69,7 +117,10 @@ function Shell({user,onLogout,children}) {
         document.removeEventListener('keydown',handleKeyDown);
       };
     }
-  },[userDropdownOpen]);
+  },[userDropdownOpen, notifDropdownOpen]);
+
+  const popoverItems = items.filter(i => !dismissedIds.has(i.id));
+
   return <NotificationContext.Provider value={notificationState}>
     <div className={'app-shell '+(menu?'menu-open':'')}>
       <aside className={'sidebar '+(menu?'open':'')}>
@@ -85,7 +136,129 @@ function Shell({user,onLogout,children}) {
         <button className="iconbtn menu-btn" onClick={()=>setMenu(!menu)}><Menu size={22}/></button>
         <div className="today"><CalendarDays size={16}/>{new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
         <div className="top-right"><span className="topsearch"><Search size={16}/> Search invoices, suppliers...</span>
-          <button className="iconbtn bell" aria-label={unread>0?`Notifications, ${unread} unread`:'Notifications'} onClick={()=>n('/notifications')}><Bell size={19}/>{unread>0&&<i/>}</button>
+          <div className="notif-dropdown-container" ref={notifDropdownRef}>
+            <button
+              className={`iconbtn bell ${notifDropdownOpen ? 'active' : ''}`}
+              aria-label={unread>0?`Notifications, ${unread} unread`:'Notifications'}
+              onClick={()=>setNotifDropdownOpen(prev=>!prev)}
+              type="button"
+            >
+              <Bell size={19}/>{unread>0&&<i/>}
+            </button>
+            {notifDropdownOpen && (
+              <div className="notif-popover-menu" role="dialog" aria-label="Thông báo">
+                <div className="notif-popover-header">
+                  <div className="notif-popover-title">
+                    <Bell size={17}/>
+                    <strong>Thông báo</strong>
+                  </div>
+                  <div className="notif-popover-header-actions">
+                    <button className="notif-popover-link-btn" type="button" onClick={markAllRead}>
+                      Đọc tất cả
+                    </button>
+                    <button className="notif-popover-close-btn" type="button" onClick={()=>setNotifDropdownOpen(false)} aria-label="Đóng">
+                      <X size={16}/>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="notif-popover-list">
+                  {notes.busy ? (
+                    <div className="notif-popover-loading"><RefreshCw size={16} className="spin"/> Đang tải...</div>
+                  ) : !popoverItems.length ? (
+                    <div className="notif-popover-empty">Không có thông báo nào</div>
+                  ) : (
+                    popoverItems.slice(0, 8).map(item => {
+                      const { icon: Icon, colorClass, priority } = getNotifConfig(item);
+                      return (
+                        <div key={item.id} className={`notif-popover-card ${!item.is_read ? 'unread' : ''}`}>
+                          <div
+                            className="notif-popover-card-main"
+                            onClick={async () => {
+                              setNotifDropdownOpen(false);
+                              await openNotificationAfterAccessCheck(item, api, markRead, n);
+                            }}
+                          >
+                            <div className={`notif-popover-icon ${colorClass}`}>
+                              <Icon size={16}/>
+                            </div>
+                            <div className="notif-popover-body">
+                              <div className="notif-popover-card-head">
+                                <strong className="notif-popover-item-title">{item.title}</strong>
+                                {!item.is_read && <span className="notif-popover-unread-dot"/>}
+                              </div>
+                              <p className="notif-popover-item-desc">{item.message}</p>
+                              <div className="notif-popover-item-meta">
+                                <span>{formatNotifTime(item.created_at)}</span>
+                                <span className="notif-meta-status">{item.is_read ? 'Đã đọc' : 'Chưa đọc'}</span>
+                                <span className={`notif-priority-tag ${priority === 'Cao' ? 'high' : 'normal'}`}>{priority}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="notif-popover-card-actions">
+                            <button
+                              className="notif-pill-btn"
+                              type="button"
+                              onClick={async () => {
+                                setNotifDropdownOpen(false);
+                                await openNotificationAfterAccessCheck(item, api, markRead, n);
+                              }}
+                            >
+                              Xem chi tiết
+                            </button>
+                            {!item.is_read && (
+                              <button
+                                className="notif-pill-btn"
+                                type="button"
+                                onClick={() => markRead(item.id)}
+                              >
+                                Đánh dấu đã đọc
+                              </button>
+                            )}
+                            <button
+                              className="notif-pill-btn delete"
+                              type="button"
+                              onClick={() => setDismissedIds(prev => new Set([...prev, item.id]))}
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="notif-popover-footer">
+                  <div className="notif-popover-footer-top">
+                    <button
+                      className="notif-popover-link-btn"
+                      type="button"
+                      onClick={() => {
+                        const readIds = popoverItems.filter(i => i.is_read).map(i => i.id);
+                        setDismissedIds(prev => new Set([...prev, ...readIds]));
+                      }}
+                    >
+                      Xóa đã đọc
+                    </button>
+                    <span className="notif-popover-summary-text">
+                      Tổng: {popoverItems.length} · {unread} chưa đọc
+                    </span>
+                  </div>
+                  <button
+                    className="notif-popover-view-all-btn"
+                    type="button"
+                    onClick={() => {
+                      setNotifDropdownOpen(false);
+                      n('/notifications');
+                    }}
+                  >
+                    Xem tất cả
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="user-dropdown-container" ref={userDropdownRef}>
             <button
               className={`userchip ${userDropdownOpen ? 'active' : ''}`}
@@ -288,42 +461,6 @@ function ReportsPage(){
  {summary&&<div className="report-summary" aria-live="polite"><div><small>Invoices in result</small><strong>{summary.invoice_count}</strong></div><div><small>Total amount (VND)</small><strong>{money(summary.total_amount)}</strong></div></div>}
  <small>Workbook contains one row per invoice and a separate line items sheet. The final statutory format under Circular 78 remains subject to Product Owner confirmation.</small></section><Notice message={message} onDismiss={()=>setMessage('')}/></>}
 function UsersPage(){const{data,reload}=useLoad('/users'),[open,setOpen]=useState(false),[form,setForm]=useState({full_name:'',email:'',password:'',role:'employee'}),[message,setMessage]=useState('');async function create(e){e.preventDefault();try{await api('/users',{method:'POST',body:form});reload();setOpen(false);setMessage('Đã tạo người dùng')}catch(e){setMessage(e.message)}}async function toggle(u){try{await api('/users/'+u.id,{method:'PATCH',body:{status:u.status==='active'?'disabled':'active'}});reload()}catch(e){setMessage(e.message)}}return <><Title title="User Management" description="Manage workspace access, roles and account status. All account history is retained." action={<button className="btn btn-primary" onClick={()=>setOpen(!open)}><Plus size={17}/> Add user</button>}/><div className="two-col"><section className="panel"><h3>Workspace users <Pill>{data?.length||0} accounts</Pill></h3><div className="user-list">{(data||[]).map(u=><div className="user-row" key={u.id}><span className="avatar">{u.full_name.slice(-2).toUpperCase()}</span><div><strong>{u.full_name}</strong><small>{u.email}</small></div><Pill>{roleName(u.role)}</Pill><Pill type={u.status==='active'?'green':'red'}>{u.status}</Pill><button title="Activate / deactivate" className="iconbtn" onClick={()=>toggle(u)}><Settings size={16}/></button></div>)}</div></section><section className="panel">{open?<><h3>Add user</h3><form className="stack" onSubmit={create}><label>Full name<input required value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label><label>Email<input type="email" required value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Temporary password<input type="password" required minLength={8} value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></label><label>Role<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{['employee','accountant','admin'].map(x=><option key={x} value={x}>{roleName(x)}</option>)}</select></label><button className="btn btn-primary"><Plus size={16}/> Create user</button></form></>:<div className="center-helper"><Users size={34}/><h3>Accounts and permissions</h3><p>Only administrators can create, edit, activate and deactivate accounts. Click Add user to create an account.</p></div>}</section></div><Notice message={message} onDismiss={()=>setMessage('')}/></>}
-function isSameDay(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate();
-}
-
-function getNotifConfig(item) {
-  const text = ((item.title || '') + ' ' + (item.message || '')).toLowerCase();
-  if (text.includes('duyệt') || text.includes('phê duyệt') || text.includes('approved')) {
-    return { icon: CheckCircle2, colorClass: 'notif-icon-green', priority: 'Bình thường' };
-  }
-  if (text.includes('chỉnh sửa') || text.includes('từ chối') || text.includes('rejected') || text.includes('needs')) {
-    return { icon: FileText, colorClass: 'notif-icon-red', priority: 'Cao' };
-  }
-  if (item.type === 'extraction_finished' || text.includes('ocr')) {
-    return { icon: Camera, colorClass: 'notif-icon-teal', priority: 'Cao' };
-  }
-  if (item.type === 'schedule_assigned' || text.includes('lịch') || text.includes('công tác')) {
-    return { icon: CalendarDays, colorClass: 'notif-icon-blue', priority: 'Bình thường' };
-  }
-  return { icon: FileUp, colorClass: 'notif-icon-green', priority: 'Bình thường' };
-}
-
-function formatNotifTime(dateString) {
-  if (!dateString) return '—';
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return '—';
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  const now = new Date();
-  if (isSameDay(d, now)) {
-    return `${hours}:${minutes}`;
-  }
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${d.getDate()} ${months[d.getMonth()]} · ${hours}:${minutes}`;
-}
 
 function NotificationsPage(){
   const notificationState=useContext(NotificationContext);

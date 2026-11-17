@@ -583,3 +583,235 @@
     justify-content: flex-start;
   }
 }
+
+/* Topbar Notification Popover (Task 2) */
+.notif-dropdown-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.iconbtn.bell {
+  position: relative;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.iconbtn.bell.active {
+  opacity: 1;
+}
+.notif-popover-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: -50px;
+  width: 390px;
+  max-width: calc(100vw - 24px);
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #e9ebef;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.04);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  animation: dropdownFadeIn 0.15s ease-out;
+  overflow: hidden;
+}
+.notif-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #f2f3f5;
+}
+.notif-popover-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1a1c20;
+}
+.notif-popover-title strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+.notif-popover-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notif-popover-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4b5563;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+.notif-popover-link-btn:hover {
+  color: #111827;
+  text-decoration: underline;
+}
+.notif-popover-close-btn {
+  appearance: none;
+  border: 0;
+  background: #f3f4f6;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.15s;
+}
+.notif-popover-close-btn:hover {
+  background: #e5e7eb;
+  color: #111;
+}
+.notif-popover-list {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notif-popover-loading,
+.notif-popover-empty {
+  padding: 30px 15px;
+  text-align: center;
+  font-size: 13px;
+  color: #8c9098;
+}
+.notif-popover-card {
+  border: 1px solid #f0f2f5;
+  border-radius: 14px;
+  background: #fbfbfc;
+  padding: 12px 14px;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notif-popover-card.unread {
+  background: #ffffff;
+  border-color: #e4e7ec;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.notif-popover-card:hover {
+  border-color: #d0d5dd;
+  background: #ffffff;
+}
+.notif-popover-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+}
+.notif-popover-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.notif-popover-body {
+  flex: 1;
+  min-width: 0;
+}
+.notif-popover-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.notif-popover-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #18191c;
+}
+.notif-popover-unread-dot {
+  width: 6px;
+  height: 6px;
+  background: #111827;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.notif-popover-item-desc {
+  font-size: 12px;
+  color: #667085;
+  margin: 0 0 6px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-popover-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #98a2b3;
+}
+.notif-meta-status {
+  color: #98a2b3;
+}
+.notif-popover-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f2f4f7;
+}
+.notif-popover-card-actions .notif-pill-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.notif-popover-footer {
+  padding: 12px 18px 16px;
+  background: #fafafb;
+  border-top: 1px solid #f2f3f5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.notif-popover-footer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.notif-popover-summary-text {
+  font-size: 11px;
+  color: #98a2b3;
+}
+.notif-popover-view-all-btn {
+  appearance: none;
+  border: 1px solid #d0d5dd;
+  background: #ffffff;
+  border-radius: 100px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #344054;
+  cursor: pointer;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  transition: all 0.15s ease;
+}
+.notif-popover-view-all-btn:hover {
+  background: #f9fafb;
+  border-color: #98a2b3;
+  color: #111827;
+}
+@media(max-width: 640px) {
+  .notif-popover-menu {
+    right: -70px;
+    width: calc(100vw - 20px);
+  }
+}
