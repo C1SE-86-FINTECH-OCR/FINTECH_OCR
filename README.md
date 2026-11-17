@@ -4,50 +4,107 @@
 
 Capstone Project 1 (CMU-SE 450) · Team **C1SE.86** · International School, Duy Tan University
 
-## About
+## Overview
 
-Fintech OCR is a web-based system that automates the processing of electronic invoices. Users upload an invoice (PDF, JPG/PNG, or XML); the system extracts the data with OCR and AI, validates it, stores it, and lets users ask questions about their invoices through a chatbot.
+FINTECH OCR is a web application for managing internal expense invoices. Employees upload PDF, JPG/PNG, or XML invoices; the system extracts draft fields, performs rule-based validation, and supports review, correction, approval, tax lookup, and reporting.
 
+> **Implementation status:** The repository contains a working development baseline, not a verified production release. The chatbot endpoint currently implements role-scoped database queries, **not Gemini/RAG**. OCR extraction is a draft that requires human review. Features described as planned in the project documents should not be assumed complete.
+
+## User Roles
+
+- **Admin:** user administration, oversight, audit and authorized accounting functions.
+- **Accountant:** invoice review, approval/rejection, tax lookup, reporting and business-trip management.
+- **Employee:** upload, review/correction, submission and permitted invoice/trip views.
+
+## Repository Structure
+
+```text
+backend/  FastAPI application, SQLAlchemy models, OCR extraction, migrations and tests
+web/      React + Vite frontend, CSS and tests
+docs/     Project and contribution notes
 ```
-Input → OCR → AI → Database → Validation → Chatbot → Output
-```
 
-## Key Features
+## Technology
 
-- Upload invoices in PDF, image (JPG/PNG), or XML format
-- OCR + LLM extraction into structured JSON (invoice number, date, seller/buyer, tax codes, line items, subtotal, VAT, total)
-- Rule-based validation (tax code, date, subtotal/VAT/total calculation) with status (valid / needs review / error) and AI confidence score
-- Review and correct extracted data side-by-side with the original invoice
-- Dashboard with statistics and Excel (.xlsx) export
-- Chatbot for natural-language Q&A over the invoice database (RAG as an extension)
-- Role-based access: Admin, Employee, Viewer
-
-## Tech Stack
-
-| Layer | Technology |
+| Area | Current repository |
 | --- | --- |
-| Frontend | React.js, Tailwind CSS |
-| Backend | Python FastAPI |
-| Database | PostgreSQL / MySQL, vector DB (RAG) |
-| AI / OCR | OpenCV, Tesseract / PaddleOCR, LLM (e.g. Google Gemini) |
-| Storage | Cloudinary / Firebase Storage |
-| Reporting | Openpyxl |
+| Frontend | React, Vite, JavaScript, CSS |
+| Backend | Python, FastAPI, SQLAlchemy |
+| Authentication | JWT and role-based access control |
+| OCR | Tesseract via pytesseract; PDF/XML processing |
+| Database | SQLite for local development; PostgreSQL is the target DBMS in project design |
+| Export | Openpyxl |
 
-## Timeline
+The **project specification** additionally targets PostgreSQL + pgvector, Tailwind CSS, Gemini/RAG and cloud storage. These are design targets and must be checked against actual implementation before being described as delivered.
 
-September 3, 2026 – December 15, 2026 (Scrum, 5 sprints + testing and final release)
+## Local Development
+
+### Backend
+
+1. Install Python and Tesseract OCR.
+2. Open a terminal in `backend/`.
+3. Create a virtual environment and install dependencies:
+   ```bash
+   python -m venv .venv
+   pip install -r requirements.txt
+   ```
+4. Copy `.env.example` to `.env`, configure a **unique** `JWT_SECRET`, and select a suitable database.
+5. Start the API:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+6. Check `http://localhost:8000/health`.
+
+> The example configuration defaults to local SQLite. PostgreSQL setup requires a separately prepared schema/migration process. Do not apply the test-only migration to the main database.
+
+### Frontend
+
+1. Open another terminal in `web/`.
+2. Install dependencies and run Vite:
+   ```bash
+   npm ci
+   npm run dev
+   ```
+3. Open `http://localhost:5173`. Use `web/.env.example` to configure `VITE_API_URL` if needed.
+
+## Tests
+
+From `backend/`:
+```bash
+pytest
+```
+
+From `web/`:
+```bash
+node --test tests/*.test.js
+npm run build
+```
+
+These are local test commands; passing results are **not** asserted here.
+
+## Git Workflow
+
+- `main`: stable/release branch.
+- `develop`: integration branch and current default branch.
+- `feature/<name-or-task>`: individual development branches created from `develop`.
+- Open a Pull Request from the feature branch to `develop`; describe actual code changes and tests, request review, and merge only after review.
+- Do not push secrets, local databases, uploaded invoice files, or generated build artifacts.
+
+## Project Plan
+
+Project period: **03 September – 15 December 2026**. The **Project Plan v1.2** defines **four development sprints**. Sprint dates should be taken from the approved Project Plan when other documents differ.
 
 ## Team
 
 | Name | Role |
 | --- | --- |
-| Tran Phuoc Hiep | Scrum Master |
-| Tran Phuoc Nhan | Team Member |
+| Tran Phuoc Nhan | Scrum Master / Project Leader |
+| Tran Phuoc Hiep | Team Member |
 | Tran Quang Thien | Team Member |
 | Tran Quoc Huy | Team Member |
 
-**Mentor:** MSc Dang Ngoc Trung
+**Mentor:** MSc. Dang Ngoc Trung
 
-## Scope Note
+## Scope
 
-Development and testing use simulated invoices. Focus is on Vietnamese e-invoices (VAT 0%, 5%, 8%, 10%). Legal authenticity checks, payment gateways, and handwritten invoices are out of scope for this phase.
+The project focuses on Vietnamese expense invoices and evaluation with simulated data. Invoice extraction and validation support human review; legal authenticity certification and payment gateway integration are not claimed as delivered features.

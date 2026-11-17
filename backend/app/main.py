@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from openpyxl import Workbook
 from .core import Base,engine,db_session,current_user,require_roles,settings,hash_password,verify_password,make_token,bearer,storage_dir
 from .models import *
+from .invoice_search import apply_invoice_search, normalize_search
 from .extraction import text_from_file,extract_fields,extract_line_items,validate
 from .risk_checks import assess_invoice_risks
 
@@ -258,6 +259,27 @@ def users(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):r
 def directory_employees(db:Session=Depends(db_session),user=Depends(require_roles('admin','accountant'))):
     return [ser(u) for u in db.scalars(select(User).where(User.role=='employee',User.status=='active').order_by(User.full_name)).all()]
 
+def employee_profile_data(target,viewer,scores):
+    score=next(((index+1,row['completed']) for index,row in enumerate(scores) if row['user_id']==target.id),None)
+    result={'id':target.id,'full_name':target.full_name,'role':target.role,'completed_trips':score[1] if score else 0,'rank':score[0] if score else None}
+    if viewer.role in ('admin','accountant') or viewer.id==target.id:
+        result.update(email=target.email,status=target.status)
+    return result
+
+@app.get('/api/v1/directory/profiles')
+def search_employee_profiles(search:str='',limit:int=Query(5,ge=1,le=250),db:Session=Depends(db_session),user=Depends(current_user)):
+    words=normalize_search(search).split()
+    if not words:return []
+    targets=db.scalars(select(User).where(User.role=='employee').order_by(User.full_name,User.id)).all()
+    scores=ranking(period='all',db=db,user=user)
+    return [employee_profile_data(target,user,scores) for target in targets if all(word in normalize_search(target.full_name) for word in words)][:limit]
+
+@app.get('/api/v1/directory/profiles/{user_id}')
+def employee_profile(user_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    target=db.get(User,user_id)
+    if not target or target.role!='employee':fail('Employee profile not found',404)
+    return employee_profile_data(target,user,ranking(period='all',db=db,user=user))
+
 @app.post('/api/v1/users',status_code=201)
 def add_user(body:NewUser,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     if body.role not in ('admin','accountant','employee'):fail('Vai trÃ² khÃ´ng há»£p lá»‡')
@@ -309,15 +331,13 @@ def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depend
 def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
     query=invoice_q(db,user)
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('NgÃ y báº¯t Ä‘áº§u khÃ´ng Ä‘Æ°á»£c sau ngÃ y káº¿t thÃºc',422)
-    if search:
-        word=f'%{search.strip()}%'
-        query=query.where(Invoice.invoice_number.ilike(word)|Invoice.seller_name.ilike(word))
+    query,search_rank=apply_invoice_search(query,db,search)
     if approval_status:query=query.where(Invoice.approval_status==approval_status)
     if validation_status:query=query.where(Invoice.validation_status==validation_status)
     if document_type:query=query.where(Invoice.document_type==document_type)
     if invoice_date_from:query=query.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:query=query.where(Invoice.invoice_date<=invoice_date_to)
-    return [inv_ser(i,db) for i in db.scalars(query.order_by(desc(Invoice.created_at),desc(Invoice.id)).offset(offset).limit(limit)).all()]
+    return [inv_ser(i,db) for i in db.scalars(query.order_by(*([search_rank] if search_rank is not None else []),desc(Invoice.created_at),desc(Invoice.id)).offset(offset).limit(limit)).all()]
 @app.get('/api/v1/invoices/{invoice_id}')
 def invoice_detail(invoice_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
     return inv_ser(invoice_allowed(db,user,invoice_id),db,True)
