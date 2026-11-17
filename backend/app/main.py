@@ -20,6 +20,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import bindparam, inspect as sa_inspect, select,func,desc,text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from openpyxl import Workbook
 from .core import Base,engine,db_session,current_user,require_roles,settings,hash_password,verify_password,make_token,bearer,storage_dir
 from .models import *
@@ -91,7 +92,7 @@ async def validation_error_handler(request,exc):
     return JSONResponse(status_code=422,content=jsonable_encoder({'detail':safe_validation_value(exc.errors())}))
 
 def fail(message:str,status=400):raise HTTPException(status_code=status,detail=message)
-def ser(u):return {'id':u.id,'full_name':u.full_name,'email':u.email,'role':u.role,'status':u.status}
+def ser(u):return {'id':u.id,'full_name':u.full_name,'email':u.email,'role':u.role,'status':u.status,'last_login_at':u.last_login_at.isoformat() if u.last_login_at else None}
 def decimal(v):return float(v) if v is not None else None
 def excel_text(v):
     if v is None:return ''
@@ -172,11 +173,13 @@ class NewUser(BaseModel):
     email:EmailStr
     password:str=Field(min_length=8,max_length=128)
     role:str
+    status:str=Field(default='active',pattern='^(active|disabled)$')
 class UpdateUser(BaseModel):
+    email:EmailStr|None=None
     full_name:str|None=Field(default=None,min_length=2,max_length=150)
     role:str|None=None
     status:str|None=None
-    @field_validator('full_name','role','status',mode='before')
+    @field_validator('full_name','email','role','status',mode='before')
     @classmethod
     def reject_null_patch_values(cls,value):
         if value is None:raise ValueError('Patch fields cannot be null')
@@ -259,7 +262,7 @@ def directory_employees(db:Session=Depends(db_session),user=Depends(require_role
 def add_user(body:NewUser,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     if body.role not in ('admin','accountant','employee'):fail('Vai trÃ² khÃ´ng há»£p lá»‡')
     if db.scalar(select(User).where(func.lower(User.email)==body.email.lower())):fail('Email Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng',409)
-    u=User(full_name=body.full_name,email=body.email.lower(),password_hash=hash_password(body.password),role=body.role,created_by=user.id)
+    u=User(full_name=body.full_name,email=body.email.lower(),password_hash=hash_password(body.password),role=body.role,status=body.status,created_by=user.id)
     db.add(u);db.flush();audit(db,user.id,'user.created','user',u.id);db.commit();return ser(u)
 @app.patch('/api/v1/users/{user_id}')
 def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
@@ -268,8 +271,30 @@ def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=D
     if body.role and body.role not in ('admin','accountant','employee'):fail('Vai trÃ² khÃ´ng há»£p lá»‡')
     if body.status and body.status not in ('active','disabled'):fail('Tráº¡ng thÃ¡i khÃ´ng há»£p lá»‡')
     if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('KhÃ´ng thá»ƒ tá»± vÃ´ hiá»‡u hÃ³a/háº¡ quyá»n tÃ i khoáº£n Ä‘ang dÃ¹ng')
+    if body.email is not None:
+        body.email=body.email.lower()
+        if db.scalar(select(User).where(func.lower(User.email)==body.email,User.id!=user_id)):fail('Email already in use',409)
     for k,v in body.model_dump(exclude_unset=True).items():setattr(u,k,v)
     audit(db,user.id,'user.updated','user',u.id);db.commit();return ser(u)
+@app.delete('/api/v1/users/{user_id}',status_code=204)
+def delete_user(user_id:int,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
+    target=db.get(User,user_id)
+    if not target:fail('User not found',404)
+    if target.id==user.id:fail('You cannot delete your own account')
+    for table in Base.metadata.sorted_tables:
+        for column in table.columns:
+            if any(fk.target_fullname=='users.id' for fk in column.foreign_keys):
+                if db.scalar(select(func.count()).select_from(table).where(column==user_id)):
+                    fail('Account has related records. Deactivate it instead.',409)
+    try:
+        audit(db,user.id,'user.deleted','user',target.id)
+        db.delete(target)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        fail('Account has related records. Deactivate it instead.',409)
+    return Response(status_code=204)
+
 @app.get('/api/v1/profile')
 def profile(user=Depends(current_user)):return ser(user)
 @app.patch('/api/v1/profile')
