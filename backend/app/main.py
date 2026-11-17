@@ -92,6 +92,7 @@ async def validation_error_handler(request,exc):
 
 def fail(message:str,status=400):raise HTTPException(status_code=status,detail=message)
 def ser(u):return {'id':u.id,'full_name':u.full_name,'email':u.email,'role':u.role,'status':u.status}
+def profile_ser(u):return {**ser(u),'phone':u.phone,'team':u.team,'employee_code':u.employee_code,'avatar_url':f'/profile/avatar?v={u.id}' if u.avatar_data else None}
 def decimal(v):return float(v) if v is not None else None
 def excel_text(v):
     if v is None:return ''
@@ -229,9 +230,34 @@ class ChatInput(BaseModel):
     question:str=Field(min_length=2,max_length=1000)
 class ProfileEdit(BaseModel):
     full_name:str=Field(min_length=2,max_length=150)
+    phone:str|None=Field(default=None,max_length=30)
+    team:str|None=Field(default=None,max_length=120)
+    @field_validator('full_name')
+    @classmethod
+    def trim_full_name(cls,value):
+        value=value.strip()
+        if len(value)<2:raise ValueError('Họ tên phải có ít nhất 2 ký tự')
+        return value
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls,value):
+        if value is not None:
+            value=value.strip()
+            if value and not re.fullmatch(r'[+()\-\d .]{7,30}',value):raise ValueError('Số điện thoại không hợp lệ')
+            return value or None
+        return None
+    @field_validator('team')
+    @classmethod
+    def trim_team(cls,value):return (value.strip() or None) if value is not None else None
 class PasswordEdit(BaseModel):
     current_password:str
     new_password:str=Field(min_length=8,max_length=128)
+    @field_validator('new_password')
+    @classmethod
+    def strong_password(cls,value):
+        if not (re.search(r'[A-Z]',value) and re.search(r'[a-z]',value) and re.search(r'\d',value) and re.search(r'[^A-Za-z0-9]',value)):
+            raise ValueError('Mật khẩu cần có chữ hoa, chữ thường, chữ số và ký tự đặc biệt')
+        return value
 
 @app.get('/health')
 def health():return {'status':'ok','project':'FINTECH OCR','mode':settings.app_env}
@@ -241,9 +267,9 @@ def login(data:LoginBody,db:Session=Depends(db_session)):
     if not user or not verify_password(data.password,user.password_hash):fail('Email hoáº·c máº­t kháº©u khÃ´ng Ä‘Ãºng',401)
     if user.status!='active':fail('TÃ i khoáº£n Ä‘Ã£ bá»‹ vÃ´ hiá»‡u hÃ³a',403)
     user.last_login_at=datetime.now(timezone.utc);db.commit()
-    return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':ser(user)}
+    return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':profile_ser(user)}
 @app.get('/api/v1/auth/me')
-def me(user=Depends(current_user)):return ser(user)
+def me(user=Depends(current_user)):return profile_ser(user)
 @app.post('/api/v1/auth/logout')
 def logout(credentials:HTTPAuthorizationCredentials=Depends(bearer),user=Depends(current_user),db:Session=Depends(db_session)):
     claims=jwt.decode(credentials.credentials,settings.jwt_secret,algorithms=['HS256'])
@@ -271,13 +297,30 @@ def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=D
     for k,v in body.model_dump(exclude_unset=True).items():setattr(u,k,v)
     audit(db,user.id,'user.updated','user',u.id);db.commit();return ser(u)
 @app.get('/api/v1/profile')
-def profile(user=Depends(current_user)):return ser(user)
+def profile(user=Depends(current_user)):return profile_ser(user)
 @app.patch('/api/v1/profile')
 def profile_edit(body:ProfileEdit,user=Depends(current_user),db:Session=Depends(db_session)):
-    user.full_name=body.full_name;db.commit();return ser(user)
+    for field,value in body.model_dump(exclude_unset=True).items():setattr(user,field,value)
+    db.commit();return profile_ser(user)
+@app.post('/api/v1/profile/avatar')
+async def profile_avatar_upload(file:UploadFile=File(...),user=Depends(current_user),db:Session=Depends(db_session)):
+    filename=(file.filename or '').lower();mime=file.content_type or ''
+    if not (filename.endswith(('.jpg','.jpeg')) and mime in ('image/jpeg','image/jpg') or filename.endswith('.png') and mime=='image/png'):
+        fail('Ảnh đại diện chỉ chấp nhận JPG hoặc PNG')
+    data=await file.read(5*1024*1024+1)
+    if not data or len(data)>5*1024*1024:fail('Ảnh phải có dung lượng tối đa 5 MB')
+    if mime=='image/png' and not data.startswith(b'\x89PNG\r\n\x1a\n'):fail('File PNG không hợp lệ')
+    if mime in ('image/jpeg','image/jpg') and not data.startswith(b'\xff\xd8\xff'):fail('File JPG không hợp lệ')
+    user.avatar_data=data;user.avatar_mime='image/png' if mime=='image/png' else 'image/jpeg';db.commit()
+    return profile_ser(user)
+@app.get('/api/v1/profile/avatar')
+def profile_avatar(user=Depends(current_user)):
+    if not user.avatar_data:fail('Chưa có ảnh đại diện',404)
+    return Response(content=user.avatar_data,media_type=user.avatar_mime or 'image/jpeg',headers={'Cache-Control':'private, max-age=300'})
 @app.put('/api/v1/profile/password')
 def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depends(db_session)):
     if not verify_password(body.current_password,user.password_hash):fail('Máº­t kháº©u hiá»‡n táº¡i khÃ´ng Ä‘Ãºng')
+    if verify_password(body.new_password,user.password_hash):fail('Mật khẩu mới phải khác mật khẩu hiện tại')
     user.password_hash=hash_password(body.new_password);audit(db,user.id,'profile.password_changed','user',user.id);db.commit()
     return {'message':'ÄÃ£ Ä‘á»•i máº­t kháº©u'}
 @app.get('/api/v1/invoices')
@@ -360,6 +403,26 @@ def invoice_file(invoice_id:int,db:Session=Depends(db_session),user=Depends(curr
     p=(storage_dir()/i.source_file.storage_key).resolve()
     if not p.is_relative_to(storage_dir()) or not p.is_file():fail('File gá»‘c chÆ°a cÃ³',404)
     return FileResponse(p,filename=i.source_file.original_filename,media_type=i.source_file.mime_type)
+@app.get('/api/v1/invoices/{invoice_id}/thumbnail')
+def invoice_thumbnail(invoice_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    i=invoice_allowed(db,user,invoice_id)
+    root=storage_dir();p=(root/i.source_file.storage_key).resolve()
+    if not p.is_relative_to(root) or not p.is_file():fail('File gá»‘c chÆ°a cÃ³',404)
+    extension=Path(i.source_file.original_filename or p.name).suffix.lower()
+    headers={'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'}
+    if extension=='.xml':return JSONResponse({'kind':'xml'},headers=headers)
+    if extension in ('.jpg','.jpeg','.png'):
+        mime='image/png' if extension=='.png' else 'image/jpeg'
+        return FileResponse(p,media_type=mime,headers=headers)
+    if extension=='.pdf':
+        import pymupdf
+        with pymupdf.open(p) as document:
+            if not document.page_count:fail('PDF khÃ´ng cÃ³ trang nÃ o',404)
+            page=document.load_page(0)
+            pixmap=page.get_pixmap(matrix=pymupdf.Matrix(2,2),alpha=False,annots=True)
+            thumbnail=pixmap.tobytes('png')
+        return Response(content=thumbnail,media_type='image/png',headers=headers)
+    fail('Äá»‹nh dáº¡ng file khÃ´ng há»— trá»£ thumbnail',415)
 @app.post('/api/v1/invoices/upload',status_code=201)
 async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     filename=Path(file.filename or 'invoice').name
