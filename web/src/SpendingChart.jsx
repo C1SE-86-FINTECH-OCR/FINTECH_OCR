@@ -15,8 +15,8 @@ function SpendingTooltip({ active, payload, label }) {
   return <div className="spending-tooltip">
     <strong>{formatDashboardMonth(label)}</strong>
     {point.invoice_count > 0
-      ? <><b>{formatVnd(point.amount)}</b><small>{point.invoice_count} {point.invoice_count === 1 ? 'invoice' : 'invoices'}</small></>
-      : <small>No invoices recorded · 0 VND</small>}
+      ? <><b>{formatVnd(point.amount)}</b><small>{point.invoice_count} {point.invoice_count === 1 ? "hóa đơn" : "hóa đơn"}</small></>
+      : <small>Chưa ghi nhận hóa đơn · 0 VND</small>}
   </div>;
 }
 
@@ -28,12 +28,12 @@ export default function SpendingChart({ summary }) {
   return <section className="panel">
     <div className="panel-heading">
       <div>
-        <h3>My spending by month</h3>
+        <h3>Chi tiêu của tôi theo tháng</h3>
         <strong className="big-number">{total}</strong>
-        <small className="spending-total-label">Total across visible invoices · all dates</small>
+        <small className="spending-total-label">Tổng tiền các hóa đơn đang hiển thị · mọi thời điểm</small>
       </div>
       <div className="spending-period">
-        <small>Last 12 months · VND</small>
+        <small>12 tháng gần nhất · VND</small>
         <small>{formatDashboardMonth(monthly[0]?.month)} – {formatDashboardMonth(monthly.at(-1)?.month)}</small>
       </div>
     </div>
@@ -52,12 +52,12 @@ export default function SpendingChart({ summary }) {
             fontSize={10}
             width={58}
             tickFormatter={formatCompactVnd}
-            label={{ value: 'VND', angle: -90, position: 'insideLeft', offset: 9, style: { fontSize: 9, fill: '#85878e' } }}
+            label={{ value: "VND", angle: -90, position: 'insideLeft', offset: 9, style: { fontSize: 9, fill: '#85878e' } }}
           />
           <Tooltip content={<SpendingTooltip/>}/>
           <Area type="monotone" dataKey="amount" stroke="#4487dc" strokeWidth={2.5} fill="url(#monthly-spending-fill)" dot={false}/>
         </AreaChart>
       </ResponsiveContainer>
-    </div> : <div className="empty spending-empty"><span>No invoices recorded in the last 12 months</span></div>}
+    </div> : <div className="empty spending-empty"><span>Chưa ghi nhận hóa đơn trong 12 tháng gần nhất</span></div>}
   </section>;
 }

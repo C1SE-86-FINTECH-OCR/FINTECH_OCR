@@ -1,10 +1,10 @@
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const UPLOAD_QUEUE_STAGES = [
-  { id: 'upload', label: 'Upload' },
+  { id: 'upload', label: 'Tải lên' },
   { id: 'ocr', label: 'OCR' },
-  { id: 'ai', label: 'AI Extraction' },
-  { id: 'validation', label: 'Validation' },
-  { id: 'done', label: 'Done' },
+  { id: 'ai', label: 'Trích xuất AI' },
+  { id: 'validation', label: 'Kiểm tra dữ liệu' },
+  { id: 'done', label: 'Hoàn tất' },
 ];
 
 const acceptedExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'xml']);

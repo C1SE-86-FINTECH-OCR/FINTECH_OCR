@@ -67,28 +67,28 @@ export default function SchedulePage({ user }) {
   }
 
   return <>
-    <header className="pagehead"><div><small className="eyebrow">FINTECH OCR / WORKSPACE</small><h1>My schedule</h1><p>{reviewer ? 'Plan business trips and keep your team on the same page.' : 'Your assigned business trips.'}</p></div></header>
+    <header className="pagehead"><div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>Lịch công tác của tôi</h1><p>{reviewer ? "Lập kế hoạch công tác và giúp cả nhóm luôn nắm được thông tin." : "Các chuyến công tác được phân công cho bạn."}</p></div></header>
     <div className="two-col">
-      <section className="panel"><h3>{reviewer ? 'Team schedule' : 'Assigned schedule'}</h3><p className="timezone-note">Times shown in this browser timezone: {timeZone}. API timestamps are parsed as ISO dates.</p>
+      <section className="panel"><h3>{reviewer ? "Lịch công tác của nhóm" : "Lịch được phân công"}</h3><p className="timezone-note">Thời gian theo múi giờ trình duyệt:{timeZone}. Thời gian từ API được đọc theo định dạng ISO.</p>
         {busy ? <div className="loading">Đang tải lịch công tác…</div> : error ? <p className="error">{error}</p> : <div className="trip-list spaced">{items.map(item => {
           const start = new Date(item.starts_at);
           return <div id={`schedule-${item.id}`} className="schedule-entry" key={item.id}>
             <div className="datebox"><strong>{Number.isNaN(start.getTime()) ? '—' : start.getDate()}</strong><span>{Number.isNaN(start.getTime()) ? '' : start.toLocaleString('vi-VN', { month: 'short' })}</span></div>
             <div className="schedule-meta"><strong>{item.title}</strong><small>{formatScheduleDateTime(item.starts_at)} – {formatScheduleDateTime(item.ends_at)}</small><small>Địa điểm: {item.destination || '—'}</small><small>Phụ trách: {item.employee_name || '—'}</small></div>
-            <div className="schedule-state"><span className={`pill ${item.status === 'completed' ? 'pill-green' : ''}`}>{statusLabels[item.status] || item.status || '—'}</span>{reviewer && <select aria-label={`Update trip ${item.id} status`} value={item.status} onChange={event => setStatus(item.id, event.target.value)} className="tiny-select">{statuses.map(status => <option key={status} value={status}>{statusLabels[status]}</option>)}</select>}</div>
+            <div className="schedule-state"><span className={`pill ${item.status === 'completed' ? 'pill-green' : ''}`}>{statusLabels[item.status] || item.status || '—'}</span>{reviewer && <select aria-label={`Cập nhật chuyến công tác ${item.id} trạng thái`} value={item.status} onChange={event => setStatus(item.id, event.target.value)} className="tiny-select">{statuses.map(status => <option key={status} value={status}>{statusLabels[status]}</option>)}</select>}</div>
           </div>;
         })}{!items.length && <div className="empty">Chưa có lịch công tác.</div>}</div>}
       </section>
-      {reviewer && <section className="panel"><h3>New schedule</h3>{employeeBusy ? <div className="loading">Đang tải danh sách Employee…</div> : <form className="stack" onSubmit={create}>
-        <label>Trip name<input required value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="Client meeting" /></label>
-        <label>Destination<input required value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} placeholder="Hà Nội" /></label>
-        <label>Employee<select required value={form.assigned_to} onChange={event => setForm({ ...form, assigned_to: event.target.value })}><option value="">Select employee</option>{employees.filter(employee => employee.role === 'employee' && employee.status === 'active').map(employee => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}</select></label>
-        <label>Start date and time<input type="datetime-local" required value={form.starts_at} onChange={event => setForm({ ...form, starts_at: event.target.value })} /></label>
-        <label>End date and time<input type="datetime-local" required value={form.ends_at} onChange={event => setForm({ ...form, ends_at: event.target.value })} /></label>
-        <small>Times are converted from the browser timezone to ISO UTC for the API.</small>
-        <button className="btn btn-primary"><Plus size={17}/> Create trip</button>
+      {reviewer && <section className="panel"><h3>Tạo lịch công tác</h3>{employeeBusy ? <div className="loading">Đang tải danh sách Nhân viên…</div> : <form className="stack" onSubmit={create}>
+        <label>Tên chuyến công tác<input required value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="Gặp khách hàng" /></label>
+        <label>Địa điểm<input required value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} placeholder="Hà Nội" /></label>
+        <label>Nhân viên<select required value={form.assigned_to} onChange={event => setForm({ ...form, assigned_to: event.target.value })}><option value="">Chọn nhân viên</option>{employees.filter(employee => employee.role === 'employee' && employee.status === 'active').map(employee => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}</select></label>
+        <label>Ngày giờ bắt đầu<input type="datetime-local" required value={form.starts_at} onChange={event => setForm({ ...form, starts_at: event.target.value })} /></label>
+        <label>Ngày giờ kết thúc<input type="datetime-local" required value={form.ends_at} onChange={event => setForm({ ...form, ends_at: event.target.value })} /></label>
+        <small>Thời gian được chuyển từ múi giờ trình duyệt sang UTC theo định dạng ISO để gửi tới API.</small>
+        <button className="btn btn-primary"><Plus size={17}/>Tạo chuyến công tác</button>
       </form>}</section>}
     </div>
-    {message && <div className="toast" role="status">{message}<button aria-label="Dismiss message" onClick={() => setMessage('')}>×</button></div>}
+    {message && <div className="toast" role="status">{message}<button aria-label="Đóng thông báo" onClick={() => setMessage('')}>×</button></div>}
   </>;
 }
