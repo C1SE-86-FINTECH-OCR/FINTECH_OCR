@@ -1,4 +1,4 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -39,7 +39,7 @@ async def lifespan(app):
         Base.metadata.create_all(bind=engine)
     storage_dir()
     yield
-app=FastAPI(title='FINTECH OCR API',version='0.1.0',lifespan=lifespan,description='API báº£n MVP cá»§a C1SE.86; AI provider vÃ  tra cá»©u thuáº¿ tá»± Ä‘á»™ng chÆ°a tÃ­ch há»£p')
+app=FastAPI(title='FINTECH OCR API',version='0.1.0',lifespan=lifespan,description='API bản MVP của C1SE.86; AI provider và tra cứu thuế tự động chưa tích hợp')
 app.add_middleware(CORSMiddleware,allow_origins=[s.strip() for s in settings.cors_origins.split(',')],allow_methods=['*'],allow_headers=['*'],allow_credentials=True)
 
 _OPTIONAL_PHASE2_COLUMNS={
@@ -183,7 +183,7 @@ class UpdateUser(BaseModel):
     @field_validator('full_name','email','role','status',mode='before')
     @classmethod
     def reject_null_patch_values(cls,value):
-        if value is None:raise ValueError('Patch fields cannot be null')
+        if value is None:raise ValueError('Trường cập nhật không được để trống')
         return value
 class InvoiceItemInput(BaseModel):
     description:str=Field(min_length=1,max_length=2000)
@@ -195,7 +195,7 @@ class InvoiceItemInput(BaseModel):
     @classmethod
     def trim_description(cls,value):
         value=value.strip()
-        if not value:raise ValueError('description cannot be blank')
+        if not value:raise ValueError('Mô tả không được để trống')
         return value
 class UpdateInvoice(BaseModel):
     invoice_number:str|None=None
@@ -213,7 +213,7 @@ class UpdateInvoice(BaseModel):
     @field_validator('items',mode='before')
     @classmethod
     def reject_null_items(cls,value):
-        if value is None:raise ValueError('items cannot be null; send an array')
+        if value is None:raise ValueError('Danh sách mặt hàng không được để trống; cần gửi dạng danh sách')
         return value
 class Decision(BaseModel):
     action:str
@@ -242,8 +242,8 @@ def health():return {'status':'ok','project':'FINTECH OCR','mode':settings.app_e
 @app.post('/api/v1/auth/login')
 def login(data:LoginBody,db:Session=Depends(db_session)):
     user=db.scalar(select(User).where(func.lower(User.email)==data.email.strip().lower()))
-    if not user or not verify_password(data.password,user.password_hash):fail('Email hoáº·c máº­t kháº©u khÃ´ng Ä‘Ãºng',401)
-    if user.status!='active':fail('TÃ i khoáº£n Ä‘Ã£ bá»‹ vÃ´ hiá»‡u hÃ³a',403)
+    if not user or not verify_password(data.password,user.password_hash):fail('Email ho\u1eb7c m\u1eadt kh\u1ea9u kh\u00f4ng \u0111\u00fang',401)
+    if user.status!='active':fail('T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb v\u00f4 hi\u1ec7u h\u00f3a',403)
     user.last_login_at=datetime.now(timezone.utc);db.commit()
     return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':ser(user)}
 @app.get('/api/v1/auth/me')
@@ -277,44 +277,44 @@ def search_employee_profiles(search:str='',limit:int=Query(5,ge=1,le=250),db:Ses
 @app.get('/api/v1/directory/profiles/{user_id}')
 def employee_profile(user_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
     target=db.get(User,user_id)
-    if not target or target.role!='employee':fail('Employee profile not found',404)
+    if not target or target.role!='employee':fail('Không tìm thấy hồ sơ nhân viên',404)
     return employee_profile_data(target,user,ranking(period='all',db=db,user=user))
 
 @app.post('/api/v1/users',status_code=201)
 def add_user(body:NewUser,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
-    if body.role not in ('admin','accountant','employee'):fail('Vai trÃ² khÃ´ng há»£p lá»‡')
-    if db.scalar(select(User).where(func.lower(User.email)==body.email.lower())):fail('Email Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng',409)
+    if body.role not in ('admin','accountant','employee'):fail('Vai trò không hợp lệ')
+    if db.scalar(select(User).where(func.lower(User.email)==body.email.lower())):fail('Email đã được sử dụng',409)
     u=User(full_name=body.full_name,email=body.email.lower(),password_hash=hash_password(body.password),role=body.role,status=body.status,created_by=user.id)
     db.add(u);db.flush();audit(db,user.id,'user.created','user',u.id);db.commit();return ser(u)
 @app.patch('/api/v1/users/{user_id}')
 def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     u=db.get(User,user_id)
-    if not u:fail('KhÃ´ng tÃ¬m tháº¥y ngÆ°á»i dÃ¹ng',404)
-    if body.role and body.role not in ('admin','accountant','employee'):fail('Vai trÃ² khÃ´ng há»£p lá»‡')
-    if body.status and body.status not in ('active','disabled'):fail('Tráº¡ng thÃ¡i khÃ´ng há»£p lá»‡')
+    if not u:fail('Không tìm thấy người dùng',404)
+    if body.role and body.role not in ('admin','accountant','employee'):fail('Vai trò không hợp lệ')
+    if body.status and body.status not in ('active','disabled'):fail('Trạng thái không hợp lệ')
     if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('KhÃ´ng thá»ƒ tá»± vÃ´ hiá»‡u hÃ³a/háº¡ quyá»n tÃ i khoáº£n Ä‘ang dÃ¹ng')
     if body.email is not None:
         body.email=body.email.lower()
-        if db.scalar(select(User).where(func.lower(User.email)==body.email,User.id!=user_id)):fail('Email already in use',409)
+        if db.scalar(select(User).where(func.lower(User.email)==body.email,User.id!=user_id)):fail('Email đã được sử dụng',409)
     for k,v in body.model_dump(exclude_unset=True).items():setattr(u,k,v)
     audit(db,user.id,'user.updated','user',u.id);db.commit();return ser(u)
 @app.delete('/api/v1/users/{user_id}',status_code=204)
 def delete_user(user_id:int,db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     target=db.get(User,user_id)
-    if not target:fail('User not found',404)
-    if target.id==user.id:fail('You cannot delete your own account')
+    if not target:fail('Không tìm thấy người dùng',404)
+    if target.id==user.id:fail('Bạn không thể xóa tài khoản đang sử dụng')
     for table in Base.metadata.sorted_tables:
         for column in table.columns:
             if any(fk.target_fullname=='users.id' for fk in column.foreign_keys):
                 if db.scalar(select(func.count()).select_from(table).where(column==user_id)):
-                    fail('Account has related records. Deactivate it instead.',409)
+                    fail('Tài khoản có dữ liệu liên quan. Vui lòng vô hiệu hóa thay vì xóa.',409)
     try:
         audit(db,user.id,'user.deleted','user',target.id)
         db.delete(target)
         db.commit()
     except IntegrityError:
         db.rollback()
-        fail('Account has related records. Deactivate it instead.',409)
+        fail('Tài khoản có dữ liệu liên quan. Vui lòng vô hiệu hóa thay vì xóa.',409)
     return Response(status_code=204)
 
 @app.get('/api/v1/profile')
@@ -324,13 +324,13 @@ def profile_edit(body:ProfileEdit,user=Depends(current_user),db:Session=Depends(
     user.full_name=body.full_name;db.commit();return ser(user)
 @app.put('/api/v1/profile/password')
 def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depends(db_session)):
-    if not verify_password(body.current_password,user.password_hash):fail('Máº­t kháº©u hiá»‡n táº¡i khÃ´ng Ä‘Ãºng')
+    if not verify_password(body.current_password,user.password_hash):fail('Mật khẩu hiện tại không đúng')
     user.password_hash=hash_password(body.new_password);audit(db,user.id,'profile.password_changed','user',user.id);db.commit()
     return {'message':'ÄÃ£ Ä‘á»•i máº­t kháº©u'}
 @app.get('/api/v1/invoices')
 def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
     query=invoice_q(db,user)
-    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('NgÃ y báº¯t Ä‘áº§u khÃ´ng Ä‘Æ°á»£c sau ngÃ y káº¿t thÃºc',422)
+    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
     query,search_rank=apply_invoice_search(query,db,search)
     if approval_status:query=query.where(Invoice.approval_status==approval_status)
     if validation_status:query=query.where(Invoice.validation_status==validation_status)
@@ -403,19 +403,19 @@ def invoice_risk_assessment(invoice_id:int,db:Session=Depends(db_session),user=D
 def invoice_file(invoice_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
     i=invoice_allowed(db,user,invoice_id)
     p=(storage_dir()/i.source_file.storage_key).resolve()
-    if not p.is_relative_to(storage_dir()) or not p.is_file():fail('File gá»‘c chÆ°a cÃ³',404)
+    if not p.is_relative_to(storage_dir()) or not p.is_file():fail('File gốc chưa có',404)
     return FileResponse(p,filename=i.source_file.original_filename,media_type=i.source_file.mime_type)
 @app.post('/api/v1/invoices/upload',status_code=201)
 async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     filename=Path(file.filename or 'invoice').name
     ext=Path(filename).suffix.lower().lstrip('.')
     mime={'pdf':'application/pdf','jpg':'image/jpeg','png':'image/png','xml':'application/xml'}
-    if ext not in mime:fail('Chá»‰ cháº¥p nháº­n PDF/JPG/PNG/XML')
+    if ext not in mime:fail('Chỉ chấp nhận PDF/JPG/PNG/XML')
     data=await file.read(settings.max_upload_mb*1024*1024+1)
     if not data or len(data)>settings.max_upload_mb*1024*1024:fail(f'File r\u1ed7ng ho\u1eb7c v\u01b0\u1ee3t gi\u1edbi h\u1ea1n {settings.max_upload_mb} MB')
-    if ext=='pdf' and not data.startswith(b'%PDF'):fail('File PDF khÃ´ng há»£p lá»‡')
-    if ext=='png' and not data.startswith(b'\x89PNG\r\n\x1a\n'):fail('File PNG khÃ´ng há»£p lá»‡')
-    if ext=='jpg' and not data.startswith(b'\xff\xd8'):fail('File JPG khÃ´ng há»£p lá»‡')
+    if ext=='pdf' and not data.startswith(b'%PDF'):fail('File PDF không hợp lệ')
+    if ext=='png' and not data.startswith(b'\x89PNG\r\n\x1a\n'):fail('File PNG không hợp lệ')
+    if ext=='jpg' and not data.startswith(b'\xff\xd8'):fail('File JPG không hợp lệ')
     safe_name=str(uuid4())+'.'+ext
     file_path=storage_dir()/safe_name
     try:
@@ -476,7 +476,7 @@ async def upload_invoice_batch(files:list[UploadFile]=File(...),db:Session=Depen
 @app.put('/api/v1/invoices/{invoice_id}')
 def edit_invoice(invoice_id:int,body:UpdateInvoice,db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     i=invoice_allowed(db,user,invoice_id)
-    if i.approval_status not in ('draft','rejected'):fail('Chá»‰ chá»‰nh sá»­a hÃ³a Ä‘Æ¡n nhÃ¡p hoáº·c Ä‘Ã£ bá»‹ tá»« chá»‘i')
+    if i.approval_status not in ('draft','rejected'):fail('Chỉ chỉnh sửa hóa đơn nháp hoặc đã bị từ chối')
     changes=body.model_dump(exclude_unset=True)
     for key,val in changes.items():
         if key=='items':continue
@@ -511,8 +511,8 @@ def edit_invoice(invoice_id:int,body:UpdateInvoice,db:Session=Depends(db_session
 @app.post('/api/v1/invoices/{invoice_id}/submit')
 def submit_invoice(invoice_id:int,db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     i=invoice_allowed(db,user,invoice_id)
-    if i.approval_status not in ('draft','rejected'):fail('Chá»‰ Ä‘Æ°á»£c gá»­i hÃ³a Ä‘Æ¡n Ä‘ang nhÃ¡p hoáº·c Ä‘Ã£ bá»‹ tá»« chá»‘i')
-    if i.validation_status=='error':fail('HÃ³a Ä‘Æ¡n Ä‘ang lá»—i xá»­ lÃ½; cáº§n kiá»ƒm tra trÆ°á»›c khi gá»­i')
+    if i.approval_status not in ('draft','rejected'):fail('Chỉ được gửi hóa đơn đang nháp hoặc đã bị từ chối')
+    if i.validation_status=='error':fail('Hóa đơn đang lỗi xử lý; cần kiểm tra trước khi gửi')
     i.approval_status='pending';submitted_at=datetime.now(timezone.utc);db.add(InvoiceApproval(invoice_id=i.id,action_by=user.id,action='submitted'))
     _phase2_write_optional(db,'invoices',i.id,{'submitted_at':submitted_at})
     for u in db.scalars(select(User).where(User.role.in_(['accountant','admin']),User.status=='active')).all():
@@ -522,8 +522,8 @@ def submit_invoice(invoice_id:int,db:Session=Depends(db_session),user=Depends(re
 def approve(invoice_id:int,body:Decision,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     i=invoice_allowed(db,user,invoice_id)
     if i.approval_status!='pending':fail('HÃ³a Ä‘Æ¡n khÃ´ng á»Ÿ tráº¡ng thÃ¡i chá» duyá»‡t')
-    if body.action not in ('approved','rejected'):fail('Chá»‰ cÃ³ thá»ƒ approved/rejected')
-    if body.action=='rejected' and not (body.reason or '').strip():fail('Tá»« chá»‘i pháº£i nháº­p lÃ½ do')
+    if body.action not in ('approved','rejected'):fail('Chỉ có thể approved/rejected')
+    if body.action=='rejected' and not (body.reason or '').strip():fail('Từ chối phải nhập lý do')
     i.approval_status=body.action;i.reviewed_by=user.id;i.reviewed_at=datetime.now(timezone.utc)
     db.add(InvoiceApproval(invoice_id=i.id,action_by=user.id,action=body.action,reason=body.reason))
     decision_label='đã được phê duyệt' if body.action=='approved' else 'bị từ chối'
@@ -534,11 +534,11 @@ def approve(invoice_id:int,body:Decision,db:Session=Depends(db_session),user=Dep
 @app.post('/api/v1/invoices/{invoice_id}/lookup')
 def lookup(invoice_id:int,body:LookupInput,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     i=invoice_allowed(db,user,invoice_id)
-    if i.document_type!='einvoice':fail('Chá»‰ hÃ³a Ä‘Æ¡n Ä‘iá»‡n tá»­ má»›i tra cá»©u thuáº¿; bill kiá»ƒm tra thá»§ cÃ´ng')
+    if i.document_type!='einvoice':fail('Chỉ hóa đơn điện tử mới tra cứu thuế; bill kiểm tra thủ công')
     required={'invoice_number':i.invoice_number,'invoice_symbol':i.invoice_symbol,'seller_tax_code':i.seller_tax_code,'invoice_date':i.invoice_date,'total_amount':i.total_amount}
     missing=[field for field,value in required.items() if value is None or (isinstance(value,str) and not value.strip())]
-    if missing:fail('Thiáº¿u dá»¯ liá»‡u tra cá»©u: '+', '.join(missing))
-    if body.result not in ('verified','mismatch','not_found'):fail('Káº¿t quáº£ tra cá»©u khÃ´ng há»£p lá»‡')
+    if missing:fail('Thiếu dữ liệu tra cứu: '+', '.join(missing))
+    if body.result not in ('verified','mismatch','not_found'):fail('Kết quả tra cứu không hợp lệ')
     i.lookup_status=body.result
     lookup_record=InvoiceLookup(invoice_id=i.id,checked_by=user.id,result=body.result,note=body.note)
     db.add(lookup_record);db.flush()
@@ -555,7 +555,7 @@ def lookup(invoice_id:int,body:LookupInput,db:Session=Depends(db_session),user=D
     audit(db,user.id,'invoice.lookup_recorded','invoice',i.id);db.commit();return inv_ser(i,db,True)
 @app.get('/api/v1/dashboard/summary')
 def summary(invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:Session=Depends(db_session),user=Depends(current_user)):
-    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('NgÃ y báº¯t Ä‘áº§u khÃ´ng Ä‘Æ°á»£c sau ngÃ y káº¿t thÃºc',422)
+    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
     query=invoice_q(db,user)
     if invoice_date_from:query=query.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:query=query.where(Invoice.invoice_date<=invoice_date_to)
@@ -576,7 +576,7 @@ def summary(invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:S
         monthly[month]['vat_amount']+=vat_amount
         monthly[month]['total_amount']+=total_amount
         monthly[month]['invoice_count']+=1
-        supplier=invoice.seller_name or '(ChÆ°a xÃ¡c Ä‘á»‹nh nhÃ  cung cáº¥p)'
+        supplier=invoice.seller_name or '(Chưa xác định nhà cung cấp)'
         suppliers[supplier]['invoice_count']+=1
         suppliers[supplier]['total_amount']+=total_amount
     return {
@@ -619,7 +619,7 @@ def notifications_unread_count(db:Session=Depends(db_session),user=Depends(curre
 @app.patch('/api/v1/notifications/{notification_id}/read')
 def read_notif(notification_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
     n=db.get(Notification,notification_id)
-    if not n or n.user_id!=user.id:fail('KhÃ´ng tÃ¬m tháº¥y thÃ´ng bÃ¡o',404)
+    if not n or n.user_id!=user.id:fail('Không tìm thấy thông báo',404)
     if not n.is_read:
         n.is_read=True
         _phase2_write_optional(db,'notifications',n.id,{'read_at':datetime.now(timezone.utc)})
@@ -642,7 +642,7 @@ def schedule_ser(s,db):
 @app.post('/api/v1/schedules',status_code=201)
 def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     employee=db.get(User,data.assigned_to)
-    if not employee or employee.role!='employee' or employee.status!='active':fail('Chá»‰ cÃ³ thá»ƒ giao lá»‹ch cho Employee Ä‘ang hoáº¡t Ä‘á»™ng')
+    if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho Employee đang hoạt động')
     if data.ends_at<=data.starts_at:fail('Thá»i gian káº¿t thÃºc pháº£i sau thá»i gian báº¯t Ä‘áº§u')
     values=data.model_dump()
     if _phase2_has_column(db,'schedules','start_date'):values['start_date']=data.starts_at.date()
@@ -655,8 +655,8 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
 @app.patch('/api/v1/schedules/{schedule_id}')
 def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     s=db.get(Schedule,schedule_id)
-    if not s:fail('KhÃ´ng tÃ¬m tháº¥y lá»‹ch',404)
-    if body.status not in ('planned','in_progress','completed','cancelled'):fail('Tráº¡ng thÃ¡i lá»‹ch khÃ´ng há»£p lá»‡')
+    if not s:fail('Không tìm thấy lịch',404)
+    if body.status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ')
     s.status=body.status;s.completed_at=datetime.now(timezone.utc) if body.status=='completed' else None
     _phase2_write_optional(db,'schedules',s.id,{'updated_at':datetime.now(timezone.utc)})
     audit(db,user.id,'schedule.updated','schedule',s.id);db.commit();return schedule_ser(s,db)
@@ -674,7 +674,7 @@ def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Sess
     return [{'user_id':uid,'full_name':db.get(User,uid).full_name,'completed':cnt} for uid,cnt in scores.most_common() if db.get(User,uid)]
 def _report_invoice_query(db,user,approval_status='',validation_status='',document_type='',search='',invoice_date_from=None,invoice_date_to=None):
     q=invoice_q(db,user)
-    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('NgÃ y báº¯t Ä‘áº§u khÃ´ng Ä‘Æ°á»£c sau ngÃ y káº¿t thÃºc',422)
+    if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
     if approval_status:q=q.where(Invoice.approval_status==approval_status)
     if validation_status:q=q.where(Invoice.validation_status==validation_status)
     if document_type:q=q.where(Invoice.document_type==document_type)
@@ -718,17 +718,17 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
     """Role-scoped database query demo; NOT an LLM or RAG implementation."""
     invoices=db.scalars(invoice_q(db,user)).all()
     q=body.question.lower()
-    if any(k in q for k in ['tá»•ng tiá»n','tá»•ng chi','bao nhiÃªu tiá»n','total spending','amount']):
+    if any(k in q for k in ['tá»•ng tiá»n','tổng chi','bao nhiêu tiền','total spending','amount']):
         answer=f'Tá»•ng sá»‘ tiá»n cá»§a {len(invoices)} hÃ³a Ä‘Æ¡n báº¡n Ä‘Æ°á»£c phÃ©p xem lÃ  {sum(float(i.total_amount or 0) for i in invoices):,.0f} VND.'
     elif any(k in q for k in ['chá» duyá»‡t','pending']):
         answer=f'CÃ³ {sum(i.approval_status=="pending" for i in invoices)} hÃ³a Ä‘Æ¡n Ä‘ang chá» duyá»‡t.'
-    elif any(k in q for k in ['Ä‘Ã£ duyá»‡t','approved']):
-        answer=f'CÃ³ {sum(i.approval_status=="approved" for i in invoices)} hÃ³a Ä‘Æ¡n Ä‘Ã£ Ä‘Æ°á»£c phÃª duyá»‡t.'
-    elif any(k in q for k in ['lá»—i','kiá»ƒm tra','needs review']):
-        answer=f'CÃ³ {sum(i.validation_status=="needs_review" for i in invoices)} hÃ³a Ä‘Æ¡n cáº§n kiá»ƒm tra láº¡i.'
-    elif any(k in q for k in ['nhÃ  cung cáº¥p','supplier']):
+    elif any(k in q for k in ['đã duyệt','approved']):
+        answer=f'Có {sum(i.approval_status=="approved" for i in invoices)} hóa đơn đã được phê duyệt.'
+    elif any(k in q for k in ['lỗi','kiểm tra','needs review']):
+        answer=f'Có {sum(i.validation_status=="needs_review" for i in invoices)} hóa đơn cần kiểm tra lại.'
+    elif any(k in q for k in ['nhà cung cấp','supplier']):
         names=list(dict.fromkeys(i.seller_name for i in invoices if i.seller_name))
-        answer='NhÃ  cung cáº¥p: '+(', '.join(names[:12]) if names else 'chÆ°a cÃ³ dá»¯ liá»‡u')+'.'
+        answer='Nhà cung cấp: '+(', '.join(names[:12]) if names else 'chưa có dữ liệu')+'.'
     else:
         answer='ÄÃ¢y lÃ  báº£n trá»£ lÃ½ truy váº¥n cÆ¡ sá»Ÿ dá»¯ liá»‡u (chÆ°a káº¿t ná»‘i Gemini/RAG). HÃ£y há»i vá» tá»•ng tiá»n, sá»‘ hÃ³a Ä‘Æ¡n chá» duyá»‡t, Ä‘Ã£ duyá»‡t, cáº§n kiá»ƒm tra hoáº·c nhÃ  cung cáº¥p.'
     conv=Conversation(user_id=user.id,title=body.question[:100]);db.add(conv);db.flush()
