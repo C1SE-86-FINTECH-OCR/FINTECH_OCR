@@ -9,6 +9,7 @@ import EmployeeProfilePage from './EmployeeProfilePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
 import UploadPage from './UploadPage';
 import EmployeeSchedulePage from './SchedulePage';
+import { getQuickDateRange } from './reportDateRanges';
 import './profile.css';
 import { formatNotificationTimestamp, markAllNotificationsReadAfterSuccess, markNotificationReadAfterSuccess, notificationTypeLabel, openNotificationAfterAccessCheck, unreadNotificationCount } from './notificationState';
 
@@ -227,7 +228,7 @@ function ReportsPage(){
  useEffect(()=>{load()},[applied,page,pageSize,sortBy,sortOrder]);
  function apply(){setPage(0);setApplied({...filters})}
  function reset(){setFilters(blank);setPage(0);setApplied(blank)}
- function quickRange(which){const now=new Date(),start=new Date(now),localDate=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(which==='month')start.setDate(1);else if(which==='prev'){start.setMonth(start.getMonth()-1);start.setDate(1);now.setDate(0)}else if(which==='year')start.setMonth(0,1);change('invoice_date_from',localDate(start));change('invoice_date_to',localDate(now))}
+  function quickRange(which){const range=getQuickDateRange(which);change('invoice_date_from',range.from);change('invoice_date_to',range.to)}
  async function saveBlob(response,filename){const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
  async function exportNow(){setBusy(true);setError('');try{if(!summary?.invoice_count){setError('Không có hóa đơn phù hợp để xuất.');return}const exportParams=new URLSearchParams(query);exportParams.set('sort_by',sortBy);exportParams.set('sort_order',sortOrder);const response=await api('/reports/export?'+exportParams.toString(),{raw:true});const disposition=response.headers.get('content-disposition')||'',filename=disposition.match(/filename="?([^";]+)"?/i)?.[1]||'bao_cao_hoa_don.xlsx';await saveBlob(response,filename);await loadHistory()}catch(e){setError(e.message)}finally{setBusy(false)}}
  async function download(id){try{const response=await api(`/reports/history/${id}/download`,{raw:true});const row=history.find(x=>x.id===id);await saveBlob(response,row?.filename||'bao_cao.xlsx')}catch(e){setError(e.message)}}
@@ -293,13 +294,13 @@ function NotificationsPage(){
 }
 
 function initials(name=''){return name.split(/\s+/).filter(Boolean).slice(-2).map(part=>part[0]).join('').toUpperCase()||'U'}
-function ProfileAvatar({user,className=''}){const[src,setSrc]=useState('');useEffect(()=>{let active=true;if(!user.avatar_url){setSrc('');return}api('/profile/avatar',{raw:true}).then(r=>r.blob()).then(blob=>{if(active)setSrc(URL.createObjectURL(blob))}).catch(()=>setSrc(''));return()=>{active=false}},[user.avatar_url,user.id]);return <span className={'profile-photo '+className}>{src?<img src={src} alt=""/>:initials(user.full_name)}</span>}
+function ProfileAvatar({user,className=''}){const[src,setSrc]=useState('');useEffect(()=>{let active=true,objectUrl='';if(!user.avatar_url){setSrc('');return}const version=encodeURIComponent(user.avatar_url);api('/profile/avatar?version='+version,{raw:true,headers:{'Cache-Control':'no-cache'}}).then(r=>r.blob()).then(blob=>{objectUrl=URL.createObjectURL(blob);if(active)setSrc(objectUrl);else URL.revokeObjectURL(objectUrl)}).catch(()=>{if(active)setSrc('')});return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)}},[user.avatar_url,user.id]);return <span className={'profile-photo '+className}>{src?<img src={src} alt=""/>:initials(user.full_name)}</span>}
 const passwordRules=value=>value.length>=8&&/[A-Z]/.test(value)&&/[a-z]/.test(value)&&/\d/.test(value)&&/[^A-Za-z0-9]/.test(value);
 function ProfilePage({user,onRefresh}){
  const navigate=useNavigate();const {data:profile,reload:reloadProfile}=useLoad('/profile');const {data:invoices,busy,error,reload}=useLoad('/invoices?limit=250');
  const [modal,setModal]=useState(''),[message,setMessage]=useState(''),[saving,setSaving]=useState(false);const [form,setForm]=useState({full_name:user.full_name,phone:'',team:''}),[photo,setPhoto]=useState(null),[photoPreview,setPhotoPreview]=useState('');const [password,setPassword]=useState({current_password:'',new_password:'',confirm_password:''}),[visible,setVisible]=useState({});const current=profile||user;
  useEffect(()=>{if(profile)setForm({full_name:profile.full_name||'',phone:profile.phone||'',team:profile.team||''})},[profile]);
- function profileErrorMessage(error){const detail=error?.message||'';if(detail==='Máº­t kháº©u hiá»‡n táº¡i khÃ´ng Ä‘Ãºng')return 'Mật khẩu hiện tại không đúng';if(/^(HTTP \d+|String should|Value error|Input should|Field required)/i.test(detail))return 'Không thể lưu thông tin. Vui lòng kiểm tra dữ liệu và thử lại.';return detail||'Đã xảy ra lỗi. Vui lòng thử lại.'}
+ function profileErrorMessage(error){const detail=error?.message||'';if(detail==="Mật khẩu hiện tại không đúng")return 'Mật khẩu hiện tại không đúng';if(/^(HTTP \d+|String should|Value error|Input should|Field required)/i.test(detail))return 'Không thể lưu thông tin. Vui lòng kiểm tra dữ liệu và thử lại.';return detail||'Đã xảy ra lỗi. Vui lòng thử lại.'}
  function openEdit(){setForm({full_name:current.full_name||'',phone:current.phone||'',team:current.team||''});setPhoto(null);setPhotoPreview('');setModal('edit')}
  function choosePhoto(file){if(!file)return;if(!['image/jpeg','image/png'].includes(file.type)){setMessage('Vui lòng chọn ảnh JPG hoặc PNG');return}if(file.size>5*1024*1024){setMessage('Dung lượng ảnh không được vượt quá 5 MB');return}setPhoto(file);setPhotoPreview(URL.createObjectURL(file))}
  async function saveProfile(e){e.preventDefault();if(form.full_name.trim().length<2){setMessage('Họ và tên phải có ít nhất 2 ký tự');return}if(form.phone&&!/^[+()\-\d .]{7,30}$/.test(form.phone.trim())){setMessage('Vui lòng nhập số điện thoại hợp lệ');return}setSaving(true);setMessage('');try{if(photo){const body=new FormData();body.append('file',photo);await api('/profile/avatar',{method:'POST',body})}await api('/profile',{method:'PATCH',body:{full_name:form.full_name.trim(),phone:form.phone.trim()||null,team:form.team.trim()||null}});await Promise.all([onRefresh(),reloadProfile()]);setModal('');setMessage('Đã cập nhật hồ sơ thành công')}catch(e){setMessage(profileErrorMessage(e))}finally{setSaving(false)}}

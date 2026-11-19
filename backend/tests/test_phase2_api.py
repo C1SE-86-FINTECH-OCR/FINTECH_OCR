@@ -1173,9 +1173,9 @@ def test_user_management_profile_password_and_disabled_account(api_env):
     client, users, test_password = api_env
     admin = _token(client, "admin@phase2.test", test_password)
     employee = _token(client, "employee1@phase2.test", test_password)
-    initial_password = secrets.token_urlsafe(24)
-    changed_password_value = secrets.token_urlsafe(24)
-    wrong_password_value = secrets.token_urlsafe(24)
+    initial_password = secrets.token_urlsafe(24) + "Aa1!"
+    changed_password_value = secrets.token_urlsafe(24) + "Bb2!"
+    wrong_password_value = secrets.token_urlsafe(24) + "Cc3!"
     headers = {"Authorization": f"Bearer {admin}"}
     employee_headers = {"Authorization": f"Bearer {employee}"}
     assert client.get("/api/v1/users", headers=employee_headers).status_code == 403
@@ -1248,6 +1248,23 @@ def test_user_management_profile_password_and_disabled_account(api_env):
     assert disabled.status_code == 200
     assert inactive_token.status_code == 401
     assert invalid_token.status_code == 401
+
+
+def test_avatar_reupload_changes_cache_version_and_disables_stale_caching(api_env):
+    client, users, password = api_env
+    token = _token(client, "employee1@phase2.test", password)
+    headers = {"Authorization": f"Bearer {token}"}
+    image_one = b"\x89PNG\r\n\x1a\nfirst-image"
+    image_two = b"\x89PNG\r\n\x1a\nsecond-image"
+    first = client.post("/api/v1/profile/avatar", headers=headers, files={"file": ("profile.png", image_one, "image/png")})
+    second = client.post("/api/v1/profile/avatar", headers=headers, files={"file": ("profile.png", image_two, "image/png")})
+    assert first.status_code == second.status_code == 200
+    assert first.json()["avatar_url"] != second.json()["avatar_url"]
+    image = client.get("/api/v1/profile/avatar?version=" + second.json()["avatar_url"], headers=headers)
+    assert image.status_code == 200 and image.content == image_two
+    assert image.headers["cache-control"] == "private, no-store, max-age=0"
+    refreshed = client.get("/api/v1/auth/me", headers=headers)
+    assert refreshed.status_code == 200 and refreshed.json()["avatar_url"] == second.json()["avatar_url"]
 
 
 def test_admin_user_patch_rejects_null_non_nullable_fields(api_env):
@@ -1324,10 +1341,14 @@ def test_report_summary_export_filters_and_line_items_do_not_duplicate_invoice_t
     with client.app.state.phase2_test_session() as db:
         invoice = db.query(Invoice).filter_by(invoice_number="PAGE-001").one()
         invoice.invoice_date = datetime(2026, 2, 12).date()
+        invoice.seller_name = " \t=HYPERLINK(\"https://example.invalid\",\"supplier\")"
+        invoice.seller_tax_code = "@SUM(1,1)"
         invoice.approval_status = "approved"
         invoice.validation_status = "valid"
         invoice.document_type = "einvoice"
         invoice.total_amount = 150
+        accountant_user = db.query(User).filter_by(email="accountant@phase2.test").one()
+        accountant_user.full_name = "\n+SUM(1,1)"
         db.add_all([
             InvoiceItem(invoice_id=invoice.id, line_no=1, description="First service", quantity=1, unit_price=100, amount=100),
             InvoiceItem(invoice_id=invoice.id, line_no=2, description='=HYPERLINK("https://example.invalid","x")', quantity=None, unit_price=None, amount=50),
@@ -1347,12 +1368,19 @@ def test_report_summary_export_filters_and_line_items_do_not_duplicate_invoice_t
 
     response = client.get(f"/api/v1/reports/export?{params}", headers=headers)
     assert response.status_code == 200
-    workbook = load_workbook(BytesIO(response.content), data_only=True)
+    workbook = load_workbook(BytesIO(response.content), data_only=False)
     assert workbook.sheetnames == ["Tổng quan báo cáo", "Danh sách hóa đơn", "Chi tiết hàng hóa"]
     invoice_rows = list(workbook["Danh sách hóa đơn"].iter_rows(min_row=2, max_row=2, values_only=True))
     item_rows = list(workbook["Chi tiết hàng hóa"].iter_rows(min_row=2, values_only=True))
     assert len(invoice_rows) == 1
     assert invoice_rows[0][1] == "PAGE-001"
+    invoice_sheet = workbook[workbook.sheetnames[1]]
+    assert invoice_sheet["D2"].data_type == "s" and invoice_sheet["D2"].value.startswith("'")
+    assert invoice_sheet["E2"].data_type == "s" and invoice_sheet["E2"].value.startswith("'")
+    assert invoice_sheet["H2"].data_type == "d"
+    assert invoice_sheet["L2"].data_type == "n" and invoice_sheet["L2"].value == 150
+    overview = workbook[workbook.sheetnames[0]]
+    assert overview["B3"].data_type == "s" and overview["B3"].value.startswith("'")
     assert invoice_rows[0][11] == 150
     assert len(item_rows) == 2
     assert item_rows[0][3] == "First service"
@@ -1584,6 +1612,79 @@ def test_notification_unread_count_is_exact_and_recipient_scoped_beyond_list_lim
     assert client.get("/api/v1/notifications/unread-count", headers=headers["accountant@phase2.test"]).json() == {"count": 1}
     assert client.get("/api/v1/notifications/unread-count", headers=headers["admin@phase2.test"]).json() == {"count": 0}
     assert client.get("/api/v1/notifications/unread-count").status_code == 401
+
+
+def test_cancelled_schedule_cannot_be_restored_over_an_active_conflict(api_env):
+    client, users, password = api_env
+    accountant = _token(client, "accountant@phase2.test", password)
+    headers = {"Authorization": f"Bearer {accountant}"}
+    starts = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(days=8)
+    target_body = {
+        "title": "Cancelled trip to restore",
+        "destination": "Test City",
+        "starts_at": starts.isoformat(),
+        "ends_at": (starts + timedelta(hours=4)).isoformat(),
+        "assigned_to": users["employee1@phase2.test"],
+    }
+    target = client.post("/api/v1/schedules", json=target_body, headers=headers)
+    assert target.status_code == 201
+    trip_id = target.json()["id"]
+    assert client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "cancelled"}, headers=headers).status_code == 200
+
+    blocker_body = {
+        **target_body,
+        "title": "Active overlapping trip",
+        "starts_at": (starts + timedelta(hours=1)).isoformat(),
+        "ends_at": (starts + timedelta(hours=2)).isoformat(),
+    }
+    blocker = client.post("/api/v1/schedules", json=blocker_body, headers=headers)
+    assert blocker.status_code == 201
+
+    conflict = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=headers)
+    assert conflict.status_code == 409
+    assert "tr\u00f9ng th\u1eddi gian" in conflict.json()["detail"]
+    current = client.get("/api/v1/schedules", headers=headers).json()
+    assert next(item for item in current if item["id"] == trip_id)["status"] == "cancelled"
+
+    assert client.patch(f"/api/v1/schedules/{blocker.json()['id']}", json={"status": "cancelled"}, headers=headers).status_code == 200
+    restored = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=headers)
+    assert restored.status_code == 200 and restored.json()["status"] == "planned"
+
+
+def test_multiday_schedule_conflict_and_ranking_count_one_trip(api_env):
+    client, users, password = api_env
+    accountant = _token(client, "accountant@phase2.test", password)
+    admin = _token(client, "admin@phase2.test", password)
+    employee = _token(client, "employee1@phase2.test", password)
+    starts = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(days=12)
+    body = {
+        "title": "Three day trip",
+        "destination": "Test Region",
+        "starts_at": starts.isoformat(),
+        "ends_at": (starts + timedelta(days=2, hours=8)).isoformat(),
+        "assigned_to": users["employee1@phase2.test"],
+    }
+    headers = {"Authorization": f"Bearer {accountant}"}
+    created = client.post("/api/v1/schedules", json=body, headers=headers)
+    assert created.status_code == 201
+    assigned_headers = {"Authorization": f"Bearer {employee}"}
+    assert created.json()["start_date"] < created.json()["end_date"]
+    assert sum(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=assigned_headers).json()) == 1
+
+    middle_day_start = starts + timedelta(days=1, hours=2)
+    conflict = client.post("/api/v1/schedules", json={
+        **body,
+        "title": "Trip during middle day",
+        "starts_at": middle_day_start.isoformat(),
+        "ends_at": (middle_day_start + timedelta(hours=1)).isoformat(),
+    }, headers=headers)
+    assert conflict.status_code == 409
+
+    completed = client.patch(f"/api/v1/schedules/{created.json()['id']}", json={"status": "completed"}, headers={"Authorization": f"Bearer {admin}"})
+    assert completed.status_code == 200
+    ranking = client.get("/api/v1/ranking?period=all", headers=assigned_headers).json()
+    row = next(item for item in ranking if item["user_id"] == users["employee1@phase2.test"])
+    assert row["completed"] == 1
 
 
 def test_schedule_cannot_be_assigned_to_disabled_employee(api_env):

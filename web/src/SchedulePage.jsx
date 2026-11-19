@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, MapPin, Pencil, Plus, RefreshCw, UserRound, Users, X } from 'lucide-react';
 import { api } from './api';
+import { tripOccursOnDate, vietnamDateTime } from './scheduleDates';
 import './SchedulePage.css';
 
 const ZONE = 'Asia/Ho_Chi_Minh';
@@ -20,9 +21,6 @@ const initials = name => (name || '').trim().split(/\s+/).slice(-2).map(x => x[0
 const timeValue = value => new Intl.DateTimeFormat('vi-VN', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
 const dateLabel = (value, options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) => new Intl.DateTimeFormat('vi-VN', { timeZone: ZONE, ...options }).format(new Date(value));
 const shortDateLabel = value => new Intl.DateTimeFormat('vi-VN', { timeZone: ZONE, day: '2-digit', month: '2-digit', year: 'numeric' }).format(value);
-const inputDateTime = value => `${dateKey(new Date(value))}T${timeValue(value)}`;
-const vietnamIso = value => { if (!value) return ''; const [day, time] = value.split('T'); return `${day}T${time}:00+07:00`; };
-const defaultDateTime = (day, hour) => `${day}T${hour}:00`;
 
 function getCalendarDays(anchor, view) {
   if (view === 'week') {
@@ -42,7 +40,7 @@ export default function SchedulePage({ user }) {
   const [anchor, setAnchor] = useState(() => fromKey(dateKey(new Date()))), [view, setView] = useState('month');
   const [employeeFilter, setEmployeeFilter] = useState(''), [statusFilter, setStatusFilter] = useState('');
   const [selectedDate, setSelectedDate] = useState(dateKey(new Date())), [selectedId, setSelectedId] = useState(null), [panel, setPanel] = useState('');
-  const [form, setForm] = useState({ title: '', destination: '', day: dateKey(new Date()), starts: defaultDateTime(dateKey(new Date()), '09:00'), ends: defaultDateTime(dateKey(new Date()), '11:00'), assigned_to: '', notes: '' });
+  const [form, setForm] = useState({ title: '', destination: '', startDay: dateKey(new Date()), endDay: dateKey(new Date()), startTime: '09:00', endTime: '11:00', assigned_to: '', notes: '' });
   const [editing, setEditing] = useState(false), [busy, setBusy] = useState(true), [employeeBusy, setEmployeeBusy] = useState(false), [saving, setSaving] = useState(false);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const [datePickerOpen, setDatePickerOpen] = useState(false), [pickerAnchor, setPickerAnchor] = useState(() => fromKey(dateKey(new Date()))), [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
@@ -124,20 +122,20 @@ export default function SchedulePage({ user }) {
   function openDatePicker() { setPickerAnchor(fromKey(selectedDate)); setDatePickerOpen(open => !open); }
   function openCreate(day = selectedDate) {
     setSelectedDate(day); setSelectedId(null); setEditing(false); setError('');
-    setForm({ title: '', destination: '', day, starts: defaultDateTime(day, '09:00'), ends: defaultDateTime(day, '11:00'), assigned_to: activeEmployees[0]?.id ? String(activeEmployees[0].id) : '', notes: '' });
+    setForm({ title: '', destination: '', startDay: day, endDay: day, startTime: '09:00', endTime: '11:00', assigned_to: activeEmployees[0]?.id ? String(activeEmployees[0].id) : '', notes: '' });
     setPanel('form');
   }
   function openEdit(item) {
     setSelectedId(item.id); setEditing(true); setError('');
-    setForm({ title: item.title || '', destination: item.destination || '', day: dateKey(new Date(item.starts_at)), starts: inputDateTime(item.starts_at), ends: inputDateTime(item.ends_at), assigned_to: String(item.assigned_to), notes: item.notes || '' });
+    setForm({ title: item.title || '', destination: item.destination || '', startDay: item.start_date || dateKey(new Date(item.starts_at)), endDay: item.end_date || dateKey(new Date(item.ends_at)), startTime: timeValue(item.starts_at), endTime: timeValue(item.ends_at), assigned_to: String(item.assigned_to), notes: item.notes || '' });
     setPanel('form');
   }
   function openDay(day) { const key = dateKey(day); setAnchor(fromKey(key)); setSelectedDate(key); setSelectedId(null); setPanel('day'); if (reviewer) openCreate(key); }
 
   async function save(event) {
     event.preventDefault(); setError(''); setMessage('');
-    if (!form.title.trim() || !form.destination.trim() || !form.day || !form.starts || !form.ends || !form.assigned_to) { setError('Vui lòng điền đầy đủ các trường bắt buộc.'); return; }
-    const startsAt = vietnamIso(form.starts), endsAt = vietnamIso(form.ends);
+    if (!form.title.trim() || !form.destination.trim() || !form.startDay || !form.endDay || !form.startTime || !form.endTime || !form.assigned_to) { setError('Vui lòng điền đầy đủ các trường bắt buộc.'); return; }
+    const startsAt = vietnamDateTime(form.startDay, form.startTime), endsAt = vietnamDateTime(form.endDay, form.endTime);
     if (new Date(endsAt) <= new Date(startsAt)) { setError('Giờ kết thúc phải sau giờ bắt đầu.'); return; }
     const body = { title: form.title.trim(), destination: form.destination.trim(), starts_at: startsAt, ends_at: endsAt, assigned_to: Number(form.assigned_to), notes: form.notes.trim() || null };
     setSaving(true);
@@ -192,7 +190,7 @@ export default function SchedulePage({ user }) {
           <div className="schedule-weekdays">{WEEKDAYS.map(day => <span key={day}>{day}</span>)}</div>
           <div className={`schedule-grid ${view === 'week' ? 'schedule-grid-week' : ''}`}>{days.map(day => {
             const key = dateKey(day), isCurrentMonth = key.startsWith(currentMonth), isToday = key === dateKey(new Date());
-            const dayItems = filteredItems.filter(item => dateKey(new Date(item.starts_at)) === key).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+            const dayItems = filteredItems.filter(item => tripOccursOnDate(item, key)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
             const visibleItems = dayItems.slice(0, 3), extra = dayItems.length - visibleItems.length;
             return <div key={key} className={`schedule-day ${view === 'month' && !isCurrentMonth ? 'outside-month' : ''} ${isToday ? 'is-today' : ''} ${selectedDate === key ? 'selected-day' : ''}`} onClick={() => openDay(day)}>
               <div className="schedule-day-label"><span>{Number(key.slice(-2))}</span></div>
@@ -213,8 +211,8 @@ export default function SchedulePage({ user }) {
           {panel === 'form' && reviewer && <form className="schedule-form" onSubmit={save}>
             <p>{editing ? 'Cập nhật thông tin chuyến công tác đã phân công.' : 'Thêm chuyến công tác vào lịch của nhân viên.'}</p>
             <label>Tên chuyến công tác<input required maxLength="255" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Ví dụ: Gặp đối tác"/></label>
-            <label>Ngày công tác<input required type="date" value={form.day} onChange={e => { const day = e.target.value; setForm({ ...form, day, starts: `${day}T${form.starts.slice(11, 16)}`, ends: `${day}T${form.ends.slice(11, 16)}` }); }}/></label>
-            <div className="schedule-time-pair"><label>Giờ bắt đầu<input required type="time" value={form.starts.slice(11, 16)} onChange={e => setForm({ ...form, starts: `${form.day}T${e.target.value}` })}/></label><label>Giờ kết thúc<input required type="time" value={form.ends.slice(11, 16)} onChange={e => setForm({ ...form, ends: `${form.day}T${e.target.value}` })}/></label></div>
+            <div className="schedule-time-pair"><label>Ngày bắt đầu<input required type="date" value={form.startDay} onChange={e => setForm({ ...form, startDay: e.target.value })}/></label><label>Ngày kết thúc<input required type="date" min={form.startDay} value={form.endDay} onChange={e => setForm({ ...form, endDay: e.target.value })}/></label></div>
+            <div className="schedule-time-pair"><label>Giờ bắt đầu<input required type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })}/></label><label>Giờ kết thúc<input required type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })}/></label></div>
             <label>Địa điểm<input required maxLength="255" value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} placeholder="Thành phố, địa chỉ"/></label>
             <label>Nhân viên được phân công<select required value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} disabled={employeeBusy}><option value="">Chọn nhân viên</option>{activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>
             <label>Ghi chú<textarea rows="4" maxLength="5000" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Thông tin cần lưu ý (không bắt buộc)"/></label>
@@ -223,7 +221,7 @@ export default function SchedulePage({ user }) {
           </form>}
           {panel === 'detail' && selected && <div className="schedule-detail">
             <span className="schedule-status-badge" style={{ backgroundColor: STATUS_CONFIG[statusKey(selected.status)].color }}>{STATUS_CONFIG[statusKey(selected.status)].label}</span><h3>{selected.title}</h3><p className="schedule-detail-destination">Chuyến công tác · {selected.destination}</p>
-            <div className="schedule-detail-row"><CalendarDays/><span><small>Ngày và giờ</small><strong>{dateLabel(selected.starts_at)}</strong><small>{timeValue(selected.starts_at)} – {timeValue(selected.ends_at)} · GMT+7</small></span></div>
+            <div className="schedule-detail-row"><CalendarDays/><span><small>Ngày và giờ</small><strong>{dateLabel(selected.starts_at, { day: 'numeric', month: 'long', year: 'numeric' })}{(selected.start_date || dateKey(new Date(selected.starts_at))) !== (selected.end_date || dateKey(new Date(selected.ends_at))) ? ` – ${dateLabel(selected.ends_at, { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</strong><small>{timeValue(selected.starts_at)} – {timeValue(selected.ends_at)} · GMT+7</small></span></div>
             <div className="schedule-detail-row"><MapPin/><span><small>Địa điểm</small><strong>{selected.destination}</strong></span></div>
             <div className="schedule-detail-row"><UserRound/><span><small>Nhân viên được phân công</small><strong>{selected.employee_name}</strong></span></div>
             <div className="schedule-detail-row"><Users/><span><small>Người phân công</small><strong>{selected.created_by_name || '—'}</strong><small>Thời gian phân công: {selected.created_at ? dateLabel(selected.created_at, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</small></span></div>
@@ -236,7 +234,7 @@ export default function SchedulePage({ user }) {
             </div>}
             {error && <p className="schedule-inline-error" role="alert">{error}</p>}
           </div>}
-          {panel === 'day' && <div className="schedule-day-list">{filteredItems.filter(item => dateKey(new Date(item.starts_at)) === selectedDate).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).map(item => { const state = STATUS_CONFIG[statusKey(item.status)]; return <button key={item.id} className="schedule-day-list-item" onClick={() => { setSelectedId(item.id); setPanel('detail'); }}><span className="schedule-status-dot" style={{ backgroundColor: state.color }}>{state.symbol}</span><span><strong>{item.title}</strong><small>{timeValue(item.starts_at)} · {state.label} · {item.employee_name}</small></span><ChevronRight size={17}/></button>; })}{!filteredItems.some(item => dateKey(new Date(item.starts_at)) === selectedDate) && <p className="schedule-no-day">Chưa có chuyến công tác trong ngày này.</p>}{reviewer && <button className="btn btn-primary full" onClick={() => openCreate(selectedDate)}><Plus size={16}/>Tạo lịch trong ngày này</button>}</div>}
+          {panel === 'day' && <div className="schedule-day-list">{filteredItems.filter(item => tripOccursOnDate(item, selectedDate)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).map(item => { const state = STATUS_CONFIG[statusKey(item.status)]; return <button key={item.id} className="schedule-day-list-item" onClick={() => { setSelectedId(item.id); setPanel('detail'); }}><span className="schedule-status-dot" style={{ backgroundColor: state.color }}>{state.symbol}</span><span><strong>{item.title}</strong><small>{timeValue(item.starts_at)} · {state.label} · {item.employee_name}</small></span><ChevronRight size={17}/></button>; })}{!filteredItems.some(item => tripOccursOnDate(item, selectedDate)) && <p className="schedule-no-day">Chưa có chuyến công tác trong ngày này.</p>}{reviewer && <button className="btn btn-primary full" onClick={() => openCreate(selectedDate)}><Plus size={16}/>Tạo lịch trong ngày này</button>}</div>}
         </>}
       </aside>
     </div>

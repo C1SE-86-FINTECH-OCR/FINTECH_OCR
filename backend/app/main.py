@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 from collections import Counter,defaultdict
 from math import isfinite
-import hashlib, re, json
+import hashlib, re, json, unicodedata
 import logging
 from copy import copy
 from weakref import WeakKeyDictionary
@@ -95,14 +95,14 @@ async def validation_error_handler(request,exc):
 
 def fail(message:str,status=400):raise HTTPException(status_code=status,detail=message)
 def ser(u):return {'id':u.id,'full_name':u.full_name,'email':u.email,'role':u.role,'status':u.status,'last_login_at':u.last_login_at.isoformat() if u.last_login_at else None}
-def profile_ser(u):return {**ser(u),'phone':u.phone,'team':u.team,'employee_code':u.employee_code,'avatar_url':f'/profile/avatar?v={u.id}' if u.avatar_data else None}
+def profile_ser(u):return {**ser(u),'phone':u.phone,'team':u.team,'employee_code':u.employee_code,'avatar_url':f'/profile/avatar?v={u.updated_at.isoformat() if u.updated_at else u.id}' if u.avatar_data else None}
 def decimal(v):return float(v) if v is not None else None
 def excel_text(v):
     if v is None:return ''
     value=str(v)
-    # Invoice text is user/OCR-controlled. Keep spreadsheet exports as text,
-    # including values Excel could otherwise interpret as formulas.
-    if value.lstrip(' \t\r\n').startswith(('=','+','-','@')):return "'"+value
+    # Neutralize control characters Excel may ignore before formula parsing.
+    value=''.join(' ' if char in '\t\r\n' else '' if unicodedata.category(char) in ('Cc','Cf') else char for char in value)
+    if value.lstrip().startswith(('=','+','-','@')):return "'"+value
     return value
 def inv_ser(i,db,details=False):
     f=i.source_file
@@ -286,7 +286,7 @@ def me(user=Depends(current_user)):return profile_ser(user)
 def logout(credentials:HTTPAuthorizationCredentials=Depends(bearer),user=Depends(current_user),db:Session=Depends(db_session)):
     claims=jwt.decode(credentials.credentials,settings.jwt_secret,algorithms=['HS256'])
     db.add(RevokedToken(jti=claims['jti'],user_id=user.id,expires_at=datetime.fromtimestamp(claims['exp'],timezone.utc)));db.commit()
-    return {'message':'ÄÃ£ Ä‘Äƒng xuáº¥t'}
+    return {'message':'Đã đăng xuất'}
 @app.get('/api/v1/users')
 def users(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):return [ser(u) for u in db.scalars(select(User).order_by(User.id)).all()]
 @app.get('/api/v1/directory/employees')
@@ -326,7 +326,7 @@ def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=D
     if not u:fail('Không tìm thấy người dùng',404)
     if body.role and body.role not in ('admin','accountant','employee'):fail('Vai trò không hợp lệ')
     if body.status and body.status not in ('active','disabled'):fail('Trạng thái không hợp lệ')
-    if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('KhÃ´ng thá»ƒ tá»± vÃ´ hiá»‡u hÃ³a/háº¡ quyá»n tÃ i khoáº£n Ä‘ang dÃ¹ng')
+    if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('Không thể tự vô hiệu hóa/hạ quyền tài khoản đang dùng')
     if body.email is not None:
         body.email=body.email.lower()
         if db.scalar(select(User).where(func.lower(User.email)==body.email,User.id!=user_id)):fail('Email đã được sử dụng',409)
@@ -371,13 +371,13 @@ async def profile_avatar_upload(file:UploadFile=File(...),user=Depends(current_u
 @app.get('/api/v1/profile/avatar')
 def profile_avatar(user=Depends(current_user)):
     if not user.avatar_data:fail('Chưa có ảnh đại diện',404)
-    return Response(content=user.avatar_data,media_type=user.avatar_mime or 'image/jpeg',headers={'Cache-Control':'private, max-age=300'})
+    return Response(content=user.avatar_data,media_type=user.avatar_mime or 'image/jpeg',headers={'Cache-Control':'private, no-store, max-age=0'})
 @app.put('/api/v1/profile/password')
 def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depends(db_session)):
-    if not verify_password(body.current_password,user.password_hash):fail('M?t kh?u hi?n t?i kh?ng ??ng')
-    if verify_password(body.new_password,user.password_hash):fail('M?t kh?u m?i ph?i kh?c m?t kh?u hi?n t?i')
+    if not verify_password(body.current_password,user.password_hash):fail('Mật khẩu hiện tại không đúng')
+    if verify_password(body.new_password,user.password_hash):fail('Mật khẩu mới phải khác mật khẩu hiện tại')
     user.password_hash=hash_password(body.new_password);audit(db,user.id,'profile.password_changed','user',user.id);db.commit()
-    return {'message':'ÄÃ£ Ä‘á»•i máº­t kháº©u'}
+    return {'message':'Đã đổi mật khẩu'}
 @app.get('/api/v1/invoices')
 def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
     query=invoice_q(db,user)
@@ -749,7 +749,7 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
 @app.patch('/api/v1/schedules/{schedule_id}')
 def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     s=db.get(Schedule,schedule_id)
-    if not s:fail('KhÃ´ng tÃ¬m tháº¥y lá»‹ch',404)
+    if not s:fail('Không tìm thấy lịch',404)
     changes=body.model_dump(exclude_unset=True)
     if not changes:fail('Không có thông tin nào để cập nhật')
     if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)
@@ -763,7 +763,8 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
     assigned_to=body.assigned_to if body.assigned_to is not None else s.assigned_to
     next_status=body.status if body.status is not None else s.status
     schedule_time_changed=(assigned_to!=s.assigned_to or starts_at!=schedule_db_datetime(s.starts_at) or ends_at!=schedule_db_datetime(s.ends_at))
-    if schedule_time_changed and next_status!='cancelled':ensure_schedule_available(db,assigned_to,starts_at,ends_at,s.id)
+    restoring_cancelled=s.status=='cancelled' and next_status!='cancelled'
+    if (schedule_time_changed or restoring_cancelled) and next_status!='cancelled':ensure_schedule_available(db,assigned_to,starts_at,ends_at,s.id)
     desired_title=body.title.strip() if body.title is not None else s.title
     desired_destination=body.destination.strip() if body.destination is not None else s.destination
     if not desired_title or not desired_destination:fail('Tên chuyến đi và địa điểm không được để trống',422)
@@ -848,7 +849,7 @@ def export_excel(approval_status:str='',validation_status:str='',document_type:s
     labels={'approval_status':'Phê duyệt','validation_status':'Kiểm tra','document_type':'Loại chứng từ','search':'Từ khóa','invoice_date_from':'Từ ngày','invoice_date_to':'Đến ngày','seller_name':'Nhà cung cấp','lookup_status':'Tra cứu'}
     states={'draft':'Nháp','pending':'Chờ xử lý','approved':'Đã phê duyệt','rejected':'Đã từ chối','valid':'Hợp lệ','needs_review':'Cần kiểm tra','error':'Lỗi','verified':'Đã xác minh','mismatch':'Không khớp','not_found':'Không tìm thấy','not_checked':'Chưa tra cứu','not_applicable':'Không áp dụng','einvoice':'Hóa đơn điện tử','bill':'Chứng từ','unknown':'Chưa xác định'}
     filter_summary=' · '.join(f"{labels.get(key,key)}: {states.get(value,value)}" for key,value in filters.items() if value) or 'Không lọc'
-    overview.append(['BÁO CÁO HÓA ĐƠN']);overview.append(['Thời gian xuất',datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S')]);overview.append(['Người xuất',user.full_name]);overview.append(['Điều kiện lọc',filter_summary]);overview.append(['Số hóa đơn',totals['invoice_count']]);overview.append(['Tổng trước thuế (VND)',totals['subtotal']]);overview.append(['Tổng VAT (VND)',totals['vat_amount']]);overview.append(['Tổng thanh toán (VND)',totals['total_amount']])
+    overview.append(['BÁO CÁO HÓA ĐƠN']);overview.append(['Thời gian xuất',datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S')]);overview.append(['Người xuất',excel_text(user.full_name)]);overview.append(['Điều kiện lọc',excel_text(filter_summary)]);overview.append(['Số hóa đơn',totals['invoice_count']]);overview.append(['Tổng trước thuế (VND)',totals['subtotal']]);overview.append(['Tổng VAT (VND)',totals['vat_amount']]);overview.append(['Tổng thanh toán (VND)',totals['total_amount']])
     overview.column_dimensions['A'].width=30;overview.column_dimensions['B'].width=75
     for cell in overview[1]:
         font=copy(cell.font);font.bold=True;font.sz=16;cell.font=font
