@@ -1286,7 +1286,7 @@ def test_excel_export_keeps_untrusted_invoice_text_as_text(api_env):
     )
     assert response.status_code == 200
     workbook = load_workbook(BytesIO(response.content), data_only=False)
-    sheet = workbook["Invoices"]
+    sheet = workbook["Danh sách hóa đơn"]
     exported = next(row for row in sheet.iter_rows(min_row=2) if row[1].value == "PAGE-003")
     assert exported[3].data_type == "s"
     assert exported[3].value.startswith("'=")
@@ -1308,8 +1308,8 @@ def test_excel_export_applies_date_supplier_and_status_filters(api_env):
         headers=headers,
     )
     assert response.status_code == 200
-    sheet = load_workbook(BytesIO(response.content), data_only=True)["Invoices"]
-    rows = list(sheet.iter_rows(min_row=2, values_only=True))
+    sheet = load_workbook(BytesIO(response.content), data_only=True)["Danh sách hóa đơn"]
+    rows = list(sheet.iter_rows(min_row=2, max_row=2, values_only=True))
     assert len(rows) == 1
     assert rows[0][1] == "PAGE-001"
     assert rows[0][2] is None
@@ -1337,15 +1337,20 @@ def test_report_summary_export_filters_and_line_items_do_not_duplicate_invoice_t
     params = "approval_status=approved&validation_status=valid&document_type=einvoice&invoice_date_from=2026-02-01&invoice_date_to=2026-02-28"
     summary = client.get(f"/api/v1/reports/summary?{params}", headers=headers)
     assert summary.status_code == 200
-    assert summary.json() == {"invoice_count": 1, "total_amount": 150, "currency": "VND"}
+    assert summary.json() == {"invoice_count": 1, "subtotal": None, "vat_amount": None, "total_amount": 150, "currency": "VND"}
+    preview = client.get(f"/api/v1/reports/invoices?{params}&limit=10&offset=0", headers=headers)
+    assert preview.status_code == 200 and preview.json()["total"] == 1
+    assert preview.json()["items"][0]["invoice_number"] == "PAGE-001"
+    assert client.get("/api/v1/reports/suppliers", headers=headers).status_code == 200
     denied = client.get(f"/api/v1/reports/summary?{params}", headers={"Authorization": f"Bearer {employee}"})
     assert denied.status_code == 403
 
     response = client.get(f"/api/v1/reports/export?{params}", headers=headers)
     assert response.status_code == 200
     workbook = load_workbook(BytesIO(response.content), data_only=True)
-    invoice_rows = list(workbook["Invoices"].iter_rows(min_row=2, values_only=True))
-    item_rows = list(workbook["Line items"].iter_rows(min_row=2, values_only=True))
+    assert workbook.sheetnames == ["Tổng quan báo cáo", "Danh sách hóa đơn", "Chi tiết hàng hóa"]
+    invoice_rows = list(workbook["Danh sách hóa đơn"].iter_rows(min_row=2, max_row=2, values_only=True))
+    item_rows = list(workbook["Chi tiết hàng hóa"].iter_rows(min_row=2, values_only=True))
     assert len(invoice_rows) == 1
     assert invoice_rows[0][1] == "PAGE-001"
     assert invoice_rows[0][11] == 150
@@ -1353,6 +1358,13 @@ def test_report_summary_export_filters_and_line_items_do_not_duplicate_invoice_t
     assert item_rows[0][3] == "First service"
     assert item_rows[1][3].startswith("'=")
     assert item_rows[1][5] is None and item_rows[1][6] is None
+    history = client.get("/api/v1/reports/history", headers=headers)
+    assert history.status_code == 200 and history.json()[0]["row_count"] == 1
+    restored = client.get(f"/api/v1/reports/history/{history.json()[0]['id']}/download", headers=headers)
+    assert restored.status_code == 200 and restored.content == response.content
+    employee_denied = client.get("/api/v1/reports/history", headers={"Authorization": f"Bearer {employee}"})
+    assert employee_denied.status_code == 403
+    assert client.get(f"/api/v1/reports/history/{history.json()[0]['id']}/download", headers={"Authorization": f"Bearer {employee}"}).status_code == 403
 
 
 def test_report_summary_empty_data_and_invalid_date_range(api_env):
@@ -1362,7 +1374,7 @@ def test_report_summary_empty_data_and_invalid_date_range(api_env):
     headers = {"Authorization": f"Bearer {accountant}"}
     empty = client.get("/api/v1/reports/summary?search=NO-SUCH-INVOICE", headers=headers)
     assert empty.status_code == 200
-    assert empty.json() == {"invoice_count": 0, "total_amount": 0, "currency": "VND"}
+    assert empty.json() == {"invoice_count": 0, "subtotal": 0, "vat_amount": 0, "total_amount": 0, "currency": "VND"}
     reversed_range = client.get(
         "/api/v1/reports/export?invoice_date_from=2026-03-01&invoice_date_to=2026-02-01",
         headers=headers,
@@ -1373,8 +1385,8 @@ def test_report_summary_empty_data_and_invalid_date_range(api_env):
     )
     assert empty_export.status_code == 200
     workbook = load_workbook(BytesIO(empty_export.content), data_only=True)
-    assert workbook["Invoices"].max_row == 1
-    assert workbook["Line items"].max_row == 1
+    assert workbook["Danh sách hóa đơn"].max_row == 2
+    assert workbook["Chi tiết hàng hóa"].max_row == 1
     admin_export = client.get(
         "/api/v1/reports/export?search=NO-SUCH-INVOICE",
         headers={"Authorization": f"Bearer {admin}"},
@@ -1423,6 +1435,20 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
     )
     assert invalid_schedule.status_code == 400
     schedule_id = created.json()["id"]
+    conflict = client.post(
+        "/api/v1/schedules",
+        json={**body, "title": "Overlapping test trip"},
+        headers={"Authorization": f"Bearer {accountant}"},
+    )
+    assert conflict.status_code == 409
+    changed = client.patch(
+        f"/api/v1/schedules/{schedule_id}",
+        json={"notes": "Bring the reconciliation file", "destination": "Updated Test City"},
+        headers={"Authorization": f"Bearer {accountant}"},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["notes"] == "Bring the reconciliation file"
+    assert changed.json()["destination"] == "Updated Test City"
     employee_one_schedules = client.get(
         "/api/v1/schedules", headers={"Authorization": f"Bearer {employee_one}"}
     ).json()
@@ -1457,9 +1483,11 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
         "/api/v1/notifications", headers={"Authorization": f"Bearer {employee_one}"}
     ).json()
     note = next(item for item in employee_notes if item["schedule_id"] == schedule_id)
-    assert sum(item["schedule_id"] == schedule_id for item in employee_notes) == 1
-    assert note["title"] == "Lịch công tác mới"
-    assert note["message"] == "Synthetic test trip – Test City"
+    assert sum(item["schedule_id"] == schedule_id for item in employee_notes) == 3
+    assert any(item["title"] == "Lịch công tác mới" and item["message"] == "Synthetic test trip – Test City" for item in employee_notes)
+    assert sum(item["title"] == "Chuyến công tác đã hoàn thành" for item in employee_notes if item["schedule_id"] == schedule_id) == 1
+    assert sum(item["title"] == "Lịch công tác đã thay đổi" for item in employee_notes if item["schedule_id"] == schedule_id) == 1
+    assert client.get(f"/api/v1/schedules?assigned_to={users['employee2@phase2.test']}", headers={"Authorization": f"Bearer {employee_one}"}).status_code == 403
     read = client.patch(
         f"/api/v1/notifications/{note['id']}/read",
         headers={"Authorization": f"Bearer {employee_one}"},
@@ -1470,6 +1498,22 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
     )
     assert read.status_code == 200
     assert cross_owner_read.status_code == 404
+    cancelled = client.patch(
+        f"/api/v1/schedules/{schedule_id}",
+        json={"status": "cancelled"},
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+    employee_one = _token(client, "employee1@phase2.test", password)
+    after_cancellation = client.get(
+        "/api/v1/ranking?period=all", headers={"Authorization": f"Bearer {employee_one}"}
+    )
+    assert after_cancellation.status_code == 200, after_cancellation.text
+    assert not any(item["user_id"] == users["employee1@phase2.test"] and item["completed"] == 1 for item in after_cancellation.json())
+    cancellation_notes = client.get(
+        "/api/v1/notifications", headers={"Authorization": f"Bearer {employee_one}"}
+    ).json()
+    assert sum(item["title"] == "Lịch công tác đã hủy" for item in cancellation_notes if item["schedule_id"] == schedule_id) == 1
 
 
 def test_notifications_are_recipient_scoped_and_mark_all_is_idempotent(api_env):

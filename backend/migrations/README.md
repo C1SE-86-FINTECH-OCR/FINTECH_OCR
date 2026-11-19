@@ -31,3 +31,26 @@ indexes. Date projections use PostgreSQL's timestamp-to-date cast in the session
 timezone; the verified test DB session timezone was `Etc/UTC`. The versioned
 runner detects repeat application and changes no schedule data on rerun. Never
 run this test-only migration against `fintech_ocr`.
+
+## Report export history
+
+`report_history_v1.py` additively adds nullable export metadata and the stored
+`.xlsx` artifact to the existing `reports` table. It does not delete or rewrite
+existing report rows and is safe to run repeatedly. Set the intended
+`DATABASE_URL`/`APP_ENV` in the backend environment, then run from `backend/`:
+
+```powershell
+.\.venv\Scripts\python.exe -m migrations.report_history_v1
+```
+
+The app's SQLite development startup creates these columns for a new database,
+but existing PostgreSQL/SQLite databases require this explicit migration.
+
+## Schedule notes
+
+`schedule_notes_v1.py` adds an optional `notes` field to existing schedules.
+The additive change preserves all existing trips and can be run repeatedly:
+
+```powershell
+.\.venv\Scripts\python.exe -m migrations.schedule_notes_v1
+```

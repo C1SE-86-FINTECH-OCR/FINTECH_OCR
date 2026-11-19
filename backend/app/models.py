@@ -136,6 +136,11 @@ class Report(Base):
     id:Mapped[int]=mapped_column(primary_key=True)
     requested_by:Mapped[int]=mapped_column(ForeignKey('users.id'))
     filters:Mapped[dict]=mapped_column(JSON,default=dict)
+    filename:Mapped[str|None]=mapped_column(String(255),nullable=True)
+    row_count:Mapped[int|None]=mapped_column(Integer,nullable=True)
+    total_amount:Mapped[float|None]=mapped_column(Numeric(18,2),nullable=True)
+    status:Mapped[str]=mapped_column(String(20),default='completed')
+    artifact_data:Mapped[bytes|None]=mapped_column(LargeBinary,nullable=True)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
 class InvoiceEmbedding(Base):
     __tablename__='invoice_embeddings'
@@ -174,6 +179,7 @@ class Schedule(Base):
     assigned_to:Mapped[int]=mapped_column(ForeignKey('users.id'))
     created_by:Mapped[int]=mapped_column(ForeignKey('users.id'))
     status:Mapped[str]=mapped_column(String(20),default='planned')
+    notes:Mapped[str|None]=mapped_column(Text,nullable=True)
     completed_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
     created_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),default=now,nullable=True)
     updated_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),default=now,onupdate=now,nullable=True)
