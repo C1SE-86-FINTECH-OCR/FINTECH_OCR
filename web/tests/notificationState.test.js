@@ -18,8 +18,8 @@ const sample = [
 ];
 
 test('notification event type labels and timestamps are readable in business timezone', () => {
-  assert.equal(notificationTypeLabel('invoice_decision'), 'Approval decision');
-  assert.equal(notificationTypeLabel(null), 'General');
+  assert.equal(notificationTypeLabel('invoice_decision'), 'Kết quả phê duyệt');
+  assert.equal(notificationTypeLabel(null), 'Thông báo chung');
   assert.match(formatNotificationTimestamp('2026-11-09T02:30:00.000Z'), /09\/11\/2026 09:30/);
   assert.equal(formatNotificationTimestamp('invalid'), '—');
 });
@@ -81,6 +81,6 @@ test('opening a notification verifies access before marking it read and navigati
     async path => { calls.push(`get:${path}`); return []; },
     async id => { calls.push(`read:${id}`); },
     path => { calls.push(`navigate:${path}`); },
-  ), /do not have access/);
+  ), /quyền xem lịch công tác/);
   assert.deepEqual(calls, ['get:/schedules']);
 });

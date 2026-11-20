@@ -11,9 +11,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
-    database_url: str = 'sqlite:///./fintech_ocr.db'
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / '.env', env_file_encoding='utf-8', extra='ignore')
+    database_url: str = 'sqlite:///' + (BACKEND_DIR / 'fintech_ocr.db').as_posix()
     jwt_secret: str = 'dev-only-replace-this-with-random-long-secret-32-characters'
     cors_origins: str = 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081'
     upload_dir: str = 'uploads'
@@ -68,4 +70,6 @@ def require_roles(*allowed):
     return dep
 
 def storage_dir()->Path:
-    p=Path(settings.upload_dir).resolve();p.mkdir(parents=True,exist_ok=True);return p
+    p=Path(settings.upload_dir)
+    if not p.is_absolute():p=BACKEND_DIR / p
+    p=p.resolve();p.mkdir(parents=True,exist_ok=True);return p

@@ -17,12 +17,12 @@ export function formatNotificationTimestamp(value) {
 
 export function notificationTypeLabel(type) {
   return ({
-    extraction_finished: 'OCR completed',
-    invoice_submitted: 'Invoice submitted',
-    invoice_decision: 'Approval decision',
-    schedule_assigned: 'Trip assigned',
-    legacy: 'General',
-  })[type] || type || 'General';
+    extraction_finished: 'Đã trích xuất OCR',
+    invoice_submitted: 'Đã gửi hóa đơn',
+    invoice_decision: 'Kết quả phê duyệt',
+    schedule_assigned: 'Được giao lịch công tác',
+    legacy: 'Thông báo chung',
+  })[type] || type || 'Thông báo chung';
 }
 
 export function setNotificationRead(items, id) {
@@ -53,7 +53,7 @@ export async function openNotificationAfterAccessCheck(notification, get, markRe
   if (target?.kind === 'schedule') {
     const schedules = await get('/schedules');
     if (!Array.isArray(schedules) || !schedules.some(item => Number(item.id) === Number(notification.schedule_id))) {
-      throw new Error('You do not have access to this schedule.');
+      throw new Error('Bạn không có quyền xem lịch công tác này.');
     }
   }
   await markRead(notification.id);
