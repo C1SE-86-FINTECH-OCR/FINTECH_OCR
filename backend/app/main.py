@@ -7,8 +7,9 @@ from pathlib import Path
 from uuid import uuid4
 from collections import Counter,defaultdict
 from math import isfinite
-import hashlib, re, json
+import hashlib, re, json, unicodedata
 import logging
+from copy import copy
 from weakref import WeakKeyDictionary
 import jwt
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Body, Response
@@ -94,13 +95,14 @@ async def validation_error_handler(request,exc):
 
 def fail(message:str,status=400):raise HTTPException(status_code=status,detail=message)
 def ser(u):return {'id':u.id,'full_name':u.full_name,'email':u.email,'role':u.role,'status':u.status,'last_login_at':u.last_login_at.isoformat() if u.last_login_at else None}
+def profile_ser(u):return {**ser(u),'phone':u.phone,'team':u.team,'employee_code':u.employee_code,'avatar_url':f'/profile/avatar?v={u.updated_at.isoformat() if u.updated_at else u.id}' if u.avatar_data else None}
 def decimal(v):return float(v) if v is not None else None
 def excel_text(v):
     if v is None:return ''
     value=str(v)
-    # Invoice text is user/OCR-controlled. Keep spreadsheet exports as text,
-    # including values Excel could otherwise interpret as formulas.
-    if value.lstrip(' \t\r\n').startswith(('=','+','-','@')):return "'"+value
+    # Neutralize control characters Excel may ignore before formula parsing.
+    value=''.join(' ' if char in '\t\r\n' else '' if unicodedata.category(char) in ('Cc','Cf') else char for char in value)
+    if value.lstrip().startswith(('=','+','-','@')):return "'"+value
     return value
 def inv_ser(i,db,details=False):
     f=i.source_file
@@ -222,20 +224,52 @@ class LookupInput(BaseModel):
     result:str
     note:str|None=None
 class ScheduleInput(BaseModel):
-    title:str
-    destination:str
+    title:str=Field(min_length=1,max_length=255)
+    destination:str=Field(min_length=1,max_length=255)
     starts_at:datetime
     ends_at:datetime
     assigned_to:int
+    notes:str|None=Field(default=None,max_length=5000)
 class ScheduleEdit(BaseModel):
-    status:str
+    title:str|None=Field(default=None,min_length=1,max_length=255)
+    destination:str|None=Field(default=None,min_length=1,max_length=255)
+    starts_at:datetime|None=None
+    ends_at:datetime|None=None
+    assigned_to:int|None=None
+    notes:str|None=Field(default=None,max_length=5000)
+    status:str|None=None
 class ChatInput(BaseModel):
     question:str=Field(min_length=2,max_length=1000)
 class ProfileEdit(BaseModel):
     full_name:str=Field(min_length=2,max_length=150)
+    phone:str|None=Field(default=None,max_length=30)
+    team:str|None=Field(default=None,max_length=120)
+    @field_validator('full_name')
+    @classmethod
+    def trim_full_name(cls,value):
+        value=value.strip()
+        if len(value)<2:raise ValueError('Họ tên phải có ít nhất 2 ký tự')
+        return value
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls,value):
+        if value is not None:
+            value=value.strip()
+            if value and not re.fullmatch(r'[+()\-\d .]{7,30}',value):raise ValueError('Số điện thoại không hợp lệ')
+            return value or None
+        return None
+    @field_validator('team')
+    @classmethod
+    def trim_team(cls,value):return (value.strip() or None) if value is not None else None
 class PasswordEdit(BaseModel):
     current_password:str
     new_password:str=Field(min_length=8,max_length=128)
+    @field_validator('new_password')
+    @classmethod
+    def strong_password(cls,value):
+        if not (re.search(r'[A-Z]',value) and re.search(r'[a-z]',value) and re.search(r'\d',value) and re.search(r'[^A-Za-z0-9]',value)):
+            raise ValueError('Mật khẩu cần có chữ hoa, chữ thường, chữ số và ký tự đặc biệt')
+        return value
 
 @app.get('/health')
 def health():return {'status':'ok','project':'FINTECH OCR','mode':settings.app_env}
@@ -245,14 +279,14 @@ def login(data:LoginBody,db:Session=Depends(db_session)):
     if not user or not verify_password(data.password,user.password_hash):fail('Email ho\u1eb7c m\u1eadt kh\u1ea9u kh\u00f4ng \u0111\u00fang',401)
     if user.status!='active':fail('T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb v\u00f4 hi\u1ec7u h\u00f3a',403)
     user.last_login_at=datetime.now(timezone.utc);db.commit()
-    return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':ser(user)}
+    return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':profile_ser(user)}
 @app.get('/api/v1/auth/me')
-def me(user=Depends(current_user)):return ser(user)
+def me(user=Depends(current_user)):return profile_ser(user)
 @app.post('/api/v1/auth/logout')
 def logout(credentials:HTTPAuthorizationCredentials=Depends(bearer),user=Depends(current_user),db:Session=Depends(db_session)):
     claims=jwt.decode(credentials.credentials,settings.jwt_secret,algorithms=['HS256'])
     db.add(RevokedToken(jti=claims['jti'],user_id=user.id,expires_at=datetime.fromtimestamp(claims['exp'],timezone.utc)));db.commit()
-    return {'message':'ÄÃ£ Ä‘Äƒng xuáº¥t'}
+    return {'message':'Đã đăng xuất'}
 @app.get('/api/v1/users')
 def users(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):return [ser(u) for u in db.scalars(select(User).order_by(User.id)).all()]
 @app.get('/api/v1/directory/employees')
@@ -292,7 +326,7 @@ def patch_user(user_id:int,body:UpdateUser,db:Session=Depends(db_session),user=D
     if not u:fail('Không tìm thấy người dùng',404)
     if body.role and body.role not in ('admin','accountant','employee'):fail('Vai trò không hợp lệ')
     if body.status and body.status not in ('active','disabled'):fail('Trạng thái không hợp lệ')
-    if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('KhÃ´ng thá»ƒ tá»± vÃ´ hiá»‡u hÃ³a/háº¡ quyá»n tÃ i khoáº£n Ä‘ang dÃ¹ng')
+    if u.id==user.id and (body.status=='disabled' or (body.role and body.role!='admin')):fail('Không thể tự vô hiệu hóa/hạ quyền tài khoản đang dùng')
     if body.email is not None:
         body.email=body.email.lower()
         if db.scalar(select(User).where(func.lower(User.email)==body.email,User.id!=user_id)):fail('Email đã được sử dụng',409)
@@ -318,15 +352,32 @@ def delete_user(user_id:int,db:Session=Depends(db_session),user=Depends(require_
     return Response(status_code=204)
 
 @app.get('/api/v1/profile')
-def profile(user=Depends(current_user)):return ser(user)
+def profile(user=Depends(current_user)):return profile_ser(user)
 @app.patch('/api/v1/profile')
 def profile_edit(body:ProfileEdit,user=Depends(current_user),db:Session=Depends(db_session)):
-    user.full_name=body.full_name;db.commit();return ser(user)
+    for field,value in body.model_dump(exclude_unset=True).items():setattr(user,field,value)
+    db.commit();return profile_ser(user)
+@app.post('/api/v1/profile/avatar')
+async def profile_avatar_upload(file:UploadFile=File(...),user=Depends(current_user),db:Session=Depends(db_session)):
+    filename=(file.filename or '').lower();mime=file.content_type or ''
+    if not (filename.endswith(('.jpg','.jpeg')) and mime in ('image/jpeg','image/jpg') or filename.endswith('.png') and mime=='image/png'):
+        fail('Ảnh đại diện chỉ chấp nhận JPG hoặc PNG')
+    data=await file.read(5*1024*1024+1)
+    if not data or len(data)>5*1024*1024:fail('Ảnh phải có dung lượng tối đa 5 MB')
+    if mime=='image/png' and not data.startswith(b'\x89PNG\r\n\x1a\n'):fail('File PNG không hợp lệ')
+    if mime in ('image/jpeg','image/jpg') and not data.startswith(b'\xff\xd8\xff'):fail('File JPG không hợp lệ')
+    user.avatar_data=data;user.avatar_mime='image/png' if mime=='image/png' else 'image/jpeg';db.commit()
+    return profile_ser(user)
+@app.get('/api/v1/profile/avatar')
+def profile_avatar(user=Depends(current_user)):
+    if not user.avatar_data:fail('Chưa có ảnh đại diện',404)
+    return Response(content=user.avatar_data,media_type=user.avatar_mime or 'image/jpeg',headers={'Cache-Control':'private, no-store, max-age=0'})
 @app.put('/api/v1/profile/password')
 def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depends(db_session)):
     if not verify_password(body.current_password,user.password_hash):fail('Mật khẩu hiện tại không đúng')
+    if verify_password(body.new_password,user.password_hash):fail('Mật khẩu mới phải khác mật khẩu hiện tại')
     user.password_hash=hash_password(body.new_password);audit(db,user.id,'profile.password_changed','user',user.id);db.commit()
-    return {'message':'ÄÃ£ Ä‘á»•i máº­t kháº©u'}
+    return {'message':'Đã đổi mật khẩu'}
 @app.get('/api/v1/invoices')
 def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
     query=invoice_q(db,user)
@@ -405,6 +456,26 @@ def invoice_file(invoice_id:int,db:Session=Depends(db_session),user=Depends(curr
     p=(storage_dir()/i.source_file.storage_key).resolve()
     if not p.is_relative_to(storage_dir()) or not p.is_file():fail('File gốc chưa có',404)
     return FileResponse(p,filename=i.source_file.original_filename,media_type=i.source_file.mime_type)
+@app.get('/api/v1/invoices/{invoice_id}/thumbnail')
+def invoice_thumbnail(invoice_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    i=invoice_allowed(db,user,invoice_id)
+    root=storage_dir();p=(root/i.source_file.storage_key).resolve()
+    if not p.is_relative_to(root) or not p.is_file():fail('File gá»‘c chÆ°a cÃ³',404)
+    extension=Path(i.source_file.original_filename or p.name).suffix.lower()
+    headers={'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'}
+    if extension=='.xml':return JSONResponse({'kind':'xml'},headers=headers)
+    if extension in ('.jpg','.jpeg','.png'):
+        mime='image/png' if extension=='.png' else 'image/jpeg'
+        return FileResponse(p,media_type=mime,headers=headers)
+    if extension=='.pdf':
+        import pymupdf
+        with pymupdf.open(p) as document:
+            if not document.page_count:fail('PDF khÃ´ng cÃ³ trang nÃ o',404)
+            page=document.load_page(0)
+            pixmap=page.get_pixmap(matrix=pymupdf.Matrix(2,2),alpha=False,annots=True)
+            thumbnail=pixmap.tobytes('png')
+        return Response(content=thumbnail,media_type='image/png',headers=headers)
+    fail('Äá»‹nh dáº¡ng file khÃ´ng há»— trá»£ thumbnail',415)
 @app.post('/api/v1/invoices/upload',status_code=201)
 async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     filename=Path(file.filename or 'invoice').name
@@ -632,21 +703,44 @@ def read_all(db:Session=Depends(db_session),user=Depends(current_user)):
         _phase2_write_optional(db,'notifications',n.id,{'read_at':now})
     db.commit();return {'ok':True}
 @app.get('/api/v1/schedules')
-def schedules(db:Session=Depends(db_session),user=Depends(current_user)):
+def schedules(assigned_to:int|None=None,status:str='',db:Session=Depends(db_session),user=Depends(current_user)):
     q=select(Schedule).order_by(Schedule.starts_at)
-    if user.role=='employee':q=q.where(Schedule.assigned_to==user.id)
+    if user.role=='employee':
+        if assigned_to is not None and assigned_to!=user.id:fail('Bạn chỉ được xem lịch công tác của mình',403)
+        q=q.where(Schedule.assigned_to==user.id)
+    elif assigned_to is not None:q=q.where(Schedule.assigned_to==assigned_to)
+    if status:
+        if status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ',422)
+        q=q.where(Schedule.status==status)
     return [schedule_ser(s,db) for s in db.scalars(q).all()]
 def schedule_ser(s,db):
     u=db.get(User,s.assigned_to)
-    return {'id':s.id,'title':s.title,'destination':s.destination,'starts_at':s.starts_at.isoformat(),'ends_at':s.ends_at.isoformat(),'start_date':(getattr(s,'start_date',None) or s.starts_at.date()).isoformat(),'end_date':(getattr(s,'end_date',None) or s.ends_at.date()).isoformat(),'assigned_to':s.assigned_to,'employee_name':u.full_name if u else '-','status':s.status,'completed_at':s.completed_at.isoformat() if s.completed_at else None,'created_at':getattr(s,'created_at',None).isoformat() if getattr(s,'created_at',None) else None,'updated_at':getattr(s,'updated_at',None).isoformat() if getattr(s,'updated_at',None) else None}
+    creator=db.get(User,s.created_by)
+    start=schedule_db_datetime(s.starts_at);end=schedule_db_datetime(s.ends_at)
+    created=schedule_db_datetime(getattr(s,'created_at',None)) if getattr(s,'created_at',None) else None
+    completed=schedule_db_datetime(s.completed_at) if s.completed_at else None
+    return {'id':s.id,'title':s.title,'destination':s.destination,'starts_at':start.isoformat(),'ends_at':end.isoformat(),'start_date':(getattr(s,'start_date',None) or start.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date()).isoformat(),'end_date':(getattr(s,'end_date',None) or end.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date()).isoformat(),'assigned_to':s.assigned_to,'employee_name':u.full_name if u else '-','created_by':s.created_by,'created_by_name':creator.full_name if creator else '—','notes':getattr(s,'notes',None),'status':s.status,'completed_at':completed.isoformat() if completed else None,'created_at':created.isoformat() if created else None,'updated_at':getattr(s,'updated_at',None).isoformat() if getattr(s,'updated_at',None) else None}
+def schedule_db_datetime(value):
+    return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
+def schedule_datetime(value):
+    return value if value.tzinfo is not None else value.replace(tzinfo=ZoneInfo('Asia/Ho_Chi_Minh'))
+def ensure_schedule_available(db,assigned_to,starts_at,ends_at,exclude_id=None):
+    q=select(Schedule.id).where(Schedule.assigned_to==assigned_to,Schedule.status!='cancelled',Schedule.starts_at<ends_at,Schedule.ends_at>starts_at)
+    if exclude_id is not None:q=q.where(Schedule.id!=exclude_id)
+    conflict=db.scalar(q.limit(1))
+    if conflict:fail('Nhân viên đã có lịch công tác trùng thời gian. Hãy chọn khung giờ khác.',409)
 @app.post('/api/v1/schedules',status_code=201)
 def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     employee=db.get(User,data.assigned_to)
-    if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho Employee đang hoạt động')
-    if data.ends_at<=data.starts_at:fail('Thá»i gian káº¿t thÃºc pháº£i sau thá»i gian báº¯t Ä‘áº§u')
-    values=data.model_dump()
-    if _phase2_has_column(db,'schedules','start_date'):values['start_date']=data.starts_at.date()
-    if _phase2_has_column(db,'schedules','end_date'):values['end_date']=data.ends_at.date()
+    if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    starts_at=schedule_datetime(data.starts_at);ends_at=schedule_datetime(data.ends_at)
+    if ends_at<=starts_at:fail('Thời gian kết thúc phải sau thời gian bắt đầu')
+    ensure_schedule_available(db,employee.id,starts_at,ends_at)
+    values=data.model_dump();values['title']=data.title.strip();values['destination']=data.destination.strip()
+    if not values['title'] or not values['destination']:fail('Tên chuyến đi và địa điểm không được để trống',422)
+    values['starts_at']=starts_at;values['ends_at']=ends_at
+    if _phase2_has_column(db,'schedules','start_date'):values['start_date']=starts_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date()
+    if _phase2_has_column(db,'schedules','end_date'):values['end_date']=ends_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date()
     values['created_at']=datetime.now(timezone.utc)
     values['updated_at']=values['created_at']
     s=Schedule(**values,created_by=user.id)
@@ -656,9 +750,42 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
 def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     s=db.get(Schedule,schedule_id)
     if not s:fail('Không tìm thấy lịch',404)
-    if body.status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ')
-    s.status=body.status;s.completed_at=datetime.now(timezone.utc) if body.status=='completed' else None
-    _phase2_write_optional(db,'schedules',s.id,{'updated_at':datetime.now(timezone.utc)})
+    changes=body.model_dump(exclude_unset=True)
+    if not changes:fail('Không có thông tin nào để cập nhật')
+    if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)
+    old_assigned=s.assigned_to;previous_status=s.status
+    employee=db.get(User,body.assigned_to) if body.assigned_to is not None else None
+    if body.assigned_to is not None and (not employee or employee.role!='employee' or employee.status!='active'):fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    if body.status is not None and body.status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ')
+    starts_at=schedule_datetime(body.starts_at) if body.starts_at is not None else schedule_db_datetime(s.starts_at)
+    ends_at=schedule_datetime(body.ends_at) if body.ends_at is not None else schedule_db_datetime(s.ends_at)
+    if ends_at<=starts_at:fail('Thời gian kết thúc phải sau thời gian bắt đầu')
+    assigned_to=body.assigned_to if body.assigned_to is not None else s.assigned_to
+    next_status=body.status if body.status is not None else s.status
+    schedule_time_changed=(assigned_to!=s.assigned_to or starts_at!=schedule_db_datetime(s.starts_at) or ends_at!=schedule_db_datetime(s.ends_at))
+    restoring_cancelled=s.status=='cancelled' and next_status!='cancelled'
+    if (schedule_time_changed or restoring_cancelled) and next_status!='cancelled':ensure_schedule_available(db,assigned_to,starts_at,ends_at,s.id)
+    desired_title=body.title.strip() if body.title is not None else s.title
+    desired_destination=body.destination.strip() if body.destination is not None else s.destination
+    if not desired_title or not desired_destination:fail('Tên chuyến đi và địa điểm không được để trống',422)
+    old_notes=getattr(s,'notes',None)
+    details_changed=(desired_title!=s.title or desired_destination!=s.destination or starts_at!=schedule_db_datetime(s.starts_at) or ends_at!=schedule_db_datetime(s.ends_at) or assigned_to!=s.assigned_to or ('notes' in changes and body.notes!=old_notes))
+    status_changed=body.status is not None and body.status!=s.status
+    for key,value in changes.items():
+        if key in ('starts_at','ends_at','assigned_to','status'):continue
+        setattr(s,key,value.strip() if isinstance(value,str) and key in ('title','destination') else value)
+    s.title=desired_title;s.destination=desired_destination
+    s.starts_at=starts_at;s.ends_at=ends_at;s.assigned_to=assigned_to
+    if body.status is not None:s.status=body.status
+    s.completed_at=datetime.now(timezone.utc) if s.status=='completed' and previous_status!='completed' else s.completed_at if s.status=='completed' else None
+    now=datetime.now(timezone.utc);_phase2_write_optional(db,'schedules',s.id,{'start_date':starts_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'end_date':ends_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'updated_at':now})
+    if old_assigned!=assigned_to:
+        notify(db,old_assigned,'Lịch công tác đã thay đổi',f'Lịch “{s.title}” đã được phân công cho nhân viên khác.',schedule_id=s.id,event_type='schedule_changed')
+    if details_changed or status_changed:
+        if s.status=='cancelled':title='Lịch công tác đã hủy';message=f'Lịch “{s.title}” đã bị hủy.';event='schedule_cancelled'
+        elif s.status=='completed' and previous_status!='completed':title='Chuyến công tác đã hoàn thành';message=f'Chuyến “{s.title}” đã được xác nhận hoàn thành.';event='schedule_completed'
+        else:title='Lịch công tác đã thay đổi';message=f'Lịch “{s.title}” đã được cập nhật.';event='schedule_changed'
+        notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
     audit(db,user.id,'schedule.updated','schedule',s.id);db.commit();return schedule_ser(s,db)
 @app.get('/api/v1/ranking')
 def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Session=Depends(db_session),user=Depends(current_user)):
@@ -672,12 +799,14 @@ def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Sess
         return True
     scores=Counter(x.assigned_to for x in rows if ok(x))
     return [{'user_id':uid,'full_name':db.get(User,uid).full_name,'completed':cnt} for uid,cnt in scores.most_common() if db.get(User,uid)]
-def _report_invoice_query(db,user,approval_status='',validation_status='',document_type='',search='',invoice_date_from=None,invoice_date_to=None):
+def _report_invoice_query(db,user,approval_status='',validation_status='',document_type='',search='',invoice_date_from=None,invoice_date_to=None,seller_name='',lookup_status=''):
     q=invoice_q(db,user)
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
     if approval_status:q=q.where(Invoice.approval_status==approval_status)
     if validation_status:q=q.where(Invoice.validation_status==validation_status)
     if document_type:q=q.where(Invoice.document_type==document_type)
+    if seller_name:q=q.where(Invoice.seller_name==seller_name)
+    if lookup_status:q=q.where(Invoice.lookup_status==lookup_status)
     if invoice_date_from:q=q.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:q=q.where(Invoice.invoice_date<=invoice_date_to)
     if search:
@@ -685,31 +814,83 @@ def _report_invoice_query(db,user,approval_status='',validation_status='',docume
         q=q.where(Invoice.invoice_number.ilike(word)|Invoice.seller_name.ilike(word))
     return q
 
+def report_filters(approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status):
+    return {'approval_status':approval_status,'validation_status':validation_status,'document_type':document_type,'search':search,'invoice_date_from':invoice_date_from.isoformat() if invoice_date_from else None,'invoice_date_to':invoice_date_to.isoformat() if invoice_date_to else None,'seller_name':seller_name,'lookup_status':lookup_status}
+
+def report_totals(rows):
+    def total(field):
+        values=[Decimal(str(getattr(i,field))) for i in rows if getattr(i,field) is not None]
+        return float(round(sum(values,Decimal('0')),2)) if values else (0 if not rows else None)
+    return {'invoice_count':len(rows),'subtotal':total('subtotal'),'vat_amount':total('vat_amount'),'total_amount':total('total_amount'),'currency':'VND'}
+
+@app.get('/api/v1/reports/suppliers')
+def reports_suppliers(db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    return [r for r in db.execute(select(Invoice.seller_name).where(Invoice.seller_name.is_not(None)).distinct().order_by(Invoice.seller_name)).scalars().all() if r]
+
 @app.get('/api/v1/reports/summary')
-def reports_summary(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
-    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to)).all()
-    total=sum((Decimal(str(i.total_amount)) if i.total_amount is not None else Decimal('0') for i in rows),Decimal('0'))
-    return {'invoice_count':len(rows),'total_amount':float(round(total,2)),'currency':'VND'}
+def reports_summary(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)).all()
+    return report_totals(rows)
+
+@app.get('/api/v1/reports/invoices')
+def reports_invoices(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',limit:int=Query(10,ge=1,le=50),offset:int=Query(0,ge=0),sort_by:str=Query('date',pattern='^(date|total)$'),sort_order:str=Query('desc',pattern='^(asc|desc)$'),db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    query=_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)
+    count=db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    order=Invoice.total_amount if sort_by=='total' else Invoice.invoice_date
+    rows=db.scalars(query.order_by(desc(order).nullslast() if sort_order=='desc' else order.asc().nullslast(),desc(Invoice.id)).limit(limit).offset(offset)).all()
+    return {'items':[{'id':i.id,'invoice_number':i.invoice_number,'invoice_date':i.invoice_date.isoformat() if i.invoice_date else None,'seller_name':i.seller_name,'seller_tax_code':i.seller_tax_code,'subtotal':decimal(i.subtotal),'vat_amount':decimal(i.vat_amount),'total_amount':decimal(i.total_amount),'approval_status':i.approval_status,'validation_status':i.validation_status,'lookup_status':i.lookup_status,'document_type':i.document_type} for i in rows],'total':count}
 
 @app.get('/api/v1/reports/export')
-def export_excel(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
-    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to).order_by(desc(Invoice.id))).all();w=Workbook();sheet=w.active;sheet.title='Invoices'
-    sheet.append(['ID','Invoice number','Invoice symbol','Supplier','Supplier tax code','Buyer','Buyer tax code','Date','Subtotal','VAT rate (%)','VAT amount','Total (VND)','Validation','Approval','Lookup','Type'])
-    for i in rows:sheet.append([i.id,excel_text(i.invoice_number),excel_text(i.invoice_symbol),excel_text(i.seller_name),excel_text(i.seller_tax_code),excel_text(i.buyer_name),excel_text(i.buyer_tax_code),i.invoice_date.isoformat() if i.invoice_date else '',decimal(i.subtotal),decimal(i.vat_rate),decimal(i.vat_amount),decimal(i.total_amount),excel_text(i.validation_status),excel_text(i.approval_status),excel_text(i.lookup_status),excel_text(i.document_type)])
-    sheet.freeze_panes='A2';sheet.auto_filter.ref=sheet.dimensions
+def export_excel(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',sort_by:str=Query('date',pattern='^(date|total)$'),sort_order:str=Query('desc',pattern='^(asc|desc)$'),db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    order=Invoice.total_amount if sort_by=='total' else Invoice.invoice_date
+    ordering=desc(order).nullslast() if sort_order=='desc' else order.asc().nullslast()
+    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status).order_by(ordering,desc(Invoice.id))).all();w=Workbook();overview=w.active;overview.title='Tổng quan báo cáo'
+    filters=report_filters(approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status);totals=report_totals(rows)
+    labels={'approval_status':'Phê duyệt','validation_status':'Kiểm tra','document_type':'Loại chứng từ','search':'Từ khóa','invoice_date_from':'Từ ngày','invoice_date_to':'Đến ngày','seller_name':'Nhà cung cấp','lookup_status':'Tra cứu'}
+    states={'draft':'Nháp','pending':'Chờ xử lý','approved':'Đã phê duyệt','rejected':'Đã từ chối','valid':'Hợp lệ','needs_review':'Cần kiểm tra','error':'Lỗi','verified':'Đã xác minh','mismatch':'Không khớp','not_found':'Không tìm thấy','not_checked':'Chưa tra cứu','not_applicable':'Không áp dụng','einvoice':'Hóa đơn điện tử','bill':'Chứng từ','unknown':'Chưa xác định'}
+    filter_summary=' · '.join(f"{labels.get(key,key)}: {states.get(value,value)}" for key,value in filters.items() if value) or 'Không lọc'
+    overview.append(['BÁO CÁO HÓA ĐƠN']);overview.append(['Thời gian xuất',datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S')]);overview.append(['Người xuất',excel_text(user.full_name)]);overview.append(['Điều kiện lọc',excel_text(filter_summary)]);overview.append(['Số hóa đơn',totals['invoice_count']]);overview.append(['Tổng trước thuế (VND)',totals['subtotal']]);overview.append(['Tổng VAT (VND)',totals['vat_amount']]);overview.append(['Tổng thanh toán (VND)',totals['total_amount']])
+    overview.column_dimensions['A'].width=30;overview.column_dimensions['B'].width=75
+    for cell in overview[1]:
+        font=copy(cell.font);font.bold=True;font.sz=16;cell.font=font
+    sheet=w.create_sheet('Danh sách hóa đơn');sheet.append(['ID','Số hóa đơn','Ký hiệu','Nhà cung cấp','Mã số thuế','Tên người mua','MST người mua','Ngày lập hóa đơn','Tiền trước thuế','Thuế suất (%)','Thuế VAT','Tổng thanh toán','Trạng thái kiểm tra','Trạng thái phê duyệt','Trạng thái tra cứu','Loại chứng từ'])
+    for i in rows:sheet.append([i.id,excel_text(i.invoice_number),excel_text(i.invoice_symbol),excel_text(i.seller_name),excel_text(i.seller_tax_code),excel_text(i.buyer_name),excel_text(i.buyer_tax_code),i.invoice_date,i.subtotal,i.vat_rate,i.vat_amount,i.total_amount,excel_text(i.validation_status),excel_text(i.approval_status),excel_text(i.lookup_status),excel_text(i.document_type)])
+    sheet.append(['','','','','','','','Tổng cộng',totals['subtotal'],None,totals['vat_amount'],totals['total_amount']])
+    for row in sheet.iter_rows(min_row=2,max_row=len(rows)+2):
+        row[7].number_format='dd/mm/yyyy'
+        for cell in (row[8],row[10],row[11]):cell.number_format='#,##0.00'
+    for cell in sheet[1]+sheet[len(rows)+2]:
+        font=copy(cell.font);font.bold=True;cell.font=font
+    sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:P{len(rows)+1}'
     for col,width in zip('ABCDEFGHIJKLMNOP',[10,22,20,35,20,35,20,16,17,15,17,20,18,18,18,15]):sheet.column_dimensions[col].width=width
-    item_sheet=w.create_sheet('Line items');item_sheet.append(['Invoice ID','Invoice number','Line number','Description','Unit','Quantity','Unit price (VND)','Amount (VND)'])
+    item_sheet=w.create_sheet('Chi tiết hàng hóa');item_sheet.append(['ID hóa đơn','Số hóa đơn','Dòng','Mô tả','Đơn vị','Số lượng','Đơn giá (VND)','Thành tiền (VND)'])
     invoice_ids=[i.id for i in rows]
     if invoice_ids:
         item_rows=db.scalars(select(InvoiceItem).where(InvoiceItem.invoice_id.in_(invoice_ids)).order_by(InvoiceItem.invoice_id,InvoiceItem.line_no)).all()
         invoice_numbers={i.id:i.invoice_number for i in rows}
         for item in item_rows:item_sheet.append([item.invoice_id,excel_text(invoice_numbers.get(item.invoice_id)),item.line_no,excel_text(item.description),excel_text(item.unit),decimal(item.quantity),decimal(item.unit_price),decimal(item.amount)])
     item_sheet.freeze_panes='A2';item_sheet.auto_filter.ref=item_sheet.dimensions
+    for row in item_sheet.iter_rows(min_row=2):
+        for cell in row[5:8]:cell.number_format='#,##0.00'
+    for cell in item_sheet[1]:
+        font=copy(cell.font);font.bold=True;cell.font=font
     for col,width in zip('ABCDEFGH',[12,22,14,45,16,15,20,20]):item_sheet.column_dimensions[col].width=width
-    data=BytesIO();w.save(data);data.seek(0)
-    filters={'approval_status':approval_status,'validation_status':validation_status,'document_type':document_type,'search':search,'invoice_date_from':invoice_date_from.isoformat() if invoice_date_from else None,'invoice_date_to':invoice_date_to.isoformat() if invoice_date_to else None}
-    db.add(Report(requested_by=user.id,filters=filters));audit(db,user.id,'report.exported','report',None);db.commit()
-    return StreamingResponse(data,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="fintech_ocr_invoices.xlsx"'})
+    data=BytesIO();w.save(data);artifact=data.getvalue();stamp=datetime.now().strftime('%Y%m%d_%H%M%S_%f');filename=f'bao_cao_hoa_don_{stamp}.xlsx'
+    record=Report(requested_by=user.id,filters=filters,filename=filename,row_count=len(rows),total_amount=totals['total_amount'],status='completed',artifact_data=artifact)
+    db.add(record);db.flush();audit(db,user.id,'report.exported','report',record.id);db.commit()
+    return StreamingResponse(BytesIO(artifact),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="{filename}"'})
+
+@app.get('/api/v1/reports/history')
+def reports_history(db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    rows=db.execute(select(Report.id,Report.created_at,User.full_name,Report.filters,Report.row_count,Report.total_amount,Report.status,Report.filename).join(User,User.id==Report.requested_by).order_by(desc(Report.id)).limit(100)).all()
+    return [{'id':r.id,'created_at':r.created_at.isoformat() if r.created_at else None,'exported_by':r.full_name,'filters':r.filters,'row_count':r.row_count,'total_amount':decimal(r.total_amount),'status':r.status,'filename':r.filename} for r in rows]
+
+@app.get('/api/v1/reports/history/{report_id}/download')
+def download_report(report_id:int,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+    report=db.get(Report,report_id)
+    if not report or not report.artifact_data:fail('Không tìm thấy báo cáo hoặc bạn không có quyền tải xuống',404)
+    audit(db,user.id,'report.downloaded','report',report.id);db.commit()
+    return StreamingResponse(BytesIO(report.artifact_data),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="{report.filename or "bao_cao.xlsx"}"'})
 @app.get('/api/v1/audit-logs')
 def audit_logs(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     return [{'id':a.id,'actor_id':a.actor_id,'action':a.action,'entity_type':a.entity_type,'entity_id':a.entity_id,'created_at':a.created_at.isoformat()} for a in db.scalars(select(AuditLog).order_by(desc(AuditLog.id)).limit(200)).all()]
