@@ -32,8 +32,52 @@ async function submit(e){e.preventDefault();setLoading(true);setError('');try{le
 return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><span className="brand-symbol">◈</span><span>FINTECH<strong>OCR / KHÔNG GIAN LÀM VIỆC</strong></span></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1>Từ hóa đơn giấy<br/>đến<em>dữ liệu chuẩn xác.</em></h1><p>Số hóa. Kiểm tra. Phê duyệt.<br/>Mọi công cụ cần thiết cho nhóm, trong một không gian làm việc.</p></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle">◈</div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack"><label>Địa chỉ email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form><div className="demo-account"><strong>TÀI KHOẢN DÙNG THỬ</strong>{['employee','accountant','admin'].map(role=><button key={role} onClick={()=>{setEmail(role+'@fintech.local');setPassword('Password@123')}}>{roleName(role)}<span>Dùng tài khoản này ↗</span></button>)}<small>Mật khẩu: Password@123 · Chỉ dùng để phát triển</small></div></div></div></div>}
 const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
 function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+}
+
+function getNotifConfig(item) {
+  const text = ((item.title || '') + ' ' + (item.message || '')).toLowerCase();
+  if (text.includes('duyệt') || text.includes('phê duyệt') || text.includes('approved')) {
+    return { icon: CheckCircle2, colorClass: 'notif-icon-green', priority: 'Bình thường' };
+  }
+  if (text.includes('chỉnh sửa') || text.includes('từ chối') || text.includes('rejected') || text.includes('needs')) {
+    return { icon: FileText, colorClass: 'notif-icon-red', priority: 'Cao' };
+  }
+  if (item.type === 'extraction_finished' || text.includes('ocr')) {
+    return { icon: Camera, colorClass: 'notif-icon-teal', priority: 'Cao' };
+  }
+  if (item.type === 'schedule_assigned' || text.includes('lịch') || text.includes('công tác')) {
+    return { icon: CalendarDays, colorClass: 'notif-icon-blue', priority: 'Bình thường' };
+  }
+  return { icon: FileUp, colorClass: 'notif-icon-green', priority: 'Bình thường' };
+}
+
+function formatNotifTime(dateString) {
+  if (!dateString) return '—';
+  const d = new Date(dateString);
+  if (Number.isNaN(d.getTime())) return '—';
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const now = new Date();
+  if (isSameDay(d, now)) {
+    return `${hours}:${minutes}`;
+  }
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${d.getDate()} ${months[d.getMonth()]} · ${hours}:${minutes}`;
+}
+function initials(name=''){return name.split(/\s+/).filter(Boolean).slice(-2).map(part=>part[0]).join('').toUpperCase()||'U'}
+function ProfileAvatar({user,className=''}){const[src,setSrc]=useState('');useEffect(()=>{let active=true,objectUrl='';if(!user.avatar_url){setSrc('');return}const version=encodeURIComponent(user.avatar_url);api('/profile/avatar?version='+version,{raw:true,headers:{'Cache-Control':'no-cache'}}).then(r=>r.blob()).then(blob=>{objectUrl=URL.createObjectURL(blob);if(active)setSrc(objectUrl);else URL.revokeObjectURL(objectUrl)}).catch(()=>{if(active)setSrc('')});return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)}},[user.avatar_url,user.id]);return <span className={'profile-photo '+className}>{src?<img src={src} alt=""/>:initials(user.full_name)}</span>}
 function Shell({user,onLogout,children}) {
   const [menu,setMenu]=useState(false), n=useNavigate(), loc=useLocation();
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+  const userDropdownRef = useRef(null);
+  const notifDropdownRef = useRef(null);
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const notes=useLoad('/notifications');
   const unreadCountState=useLoad('/notifications/unread-count');
   const previousPath=useRef(loc.pathname);
@@ -56,9 +100,38 @@ function Shell({user,onLogout,children}) {
   };
   useEffect(()=>{
     setMenu(false);
+    setUserDropdownOpen(false);
+    setNotifDropdownOpen(false);
     if(previousPath.current!==loc.pathname){notes.reload();unreadCountState.reload();}
     previousPath.current=loc.pathname;
   },[loc.pathname]);
+  useEffect(()=>{
+    function handleOutside(e){
+      if(userDropdownRef.current&&!userDropdownRef.current.contains(e.target)){
+        setUserDropdownOpen(false);
+      }
+      if(notifDropdownRef.current&&!notifDropdownRef.current.contains(e.target)){
+        setNotifDropdownOpen(false);
+      }
+    }
+    function handleKeyDown(e){
+      if(e.key==='Escape'){
+        setUserDropdownOpen(false);
+        setNotifDropdownOpen(false);
+      }
+    }
+    if(userDropdownOpen || notifDropdownOpen){
+      document.addEventListener('mousedown',handleOutside);
+      document.addEventListener('keydown',handleKeyDown);
+      return ()=>{
+        document.removeEventListener('mousedown',handleOutside);
+        document.removeEventListener('keydown',handleKeyDown);
+      };
+    }
+  },[userDropdownOpen, notifDropdownOpen]);
+
+  const popoverItems = items.filter(i => !dismissedIds.has(i.id));
+
   return <NotificationContext.Provider value={notificationState}>
     <div className={'app-shell '+(menu?'menu-open':'')}>
       <aside className={'sidebar '+(menu?'open':'')}>
@@ -72,12 +145,175 @@ function Shell({user,onLogout,children}) {
       <div className="mobile-backdrop" style={{display:menu?'block':'none'}} onClick={()=>setMenu(false)}/>
       <div className="workspace"><div className="topbar">
         <button className="iconbtn menu-btn" onClick={()=>setMenu(!menu)}><Menu size={22}/></button>
-
         <div className="today"><CalendarDays size={16}/>{new Date().toLocaleDateString('vi-VN',{month:'long',day:'numeric',year:'numeric'})}</div>
         <div className="top-right"><QuickInvoiceSearch/>
-          <button className="iconbtn bell" aria-label={unread>0?`Thông báo, ${unread} chưa đọc`:"Thông báo"} onClick={()=>n('/notifications')}><Bell size={19}/>{unread>0&&<i/>}</button>
-          <button className="userchip" onClick={()=>n('/profile')}><ProfileAvatar user={user}/><span className="userchip-name">{user.full_name}</span><ChevronDown size={15}/></button>
+          <div className="notif-dropdown-container" ref={notifDropdownRef}>
+            <button
+              className={`iconbtn bell ${notifDropdownOpen ? 'active' : ''}`}
+              aria-label={unread>0?`Thông báo, ${unread} chưa đọc`:'Thông báo'}
+              onClick={()=>setNotifDropdownOpen(prev=>!prev)}
+              type="button"
+            >
+              <Bell size={19}/>{unread>0&&<i/>}
+            </button>
+            {notifDropdownOpen && (
+              <div className="notif-popover-menu" role="dialog" aria-label="Thông báo">
+                <div className="notif-popover-header">
+                  <div className="notif-popover-title">
+                    <Bell size={17}/>
+                    <strong>Thông báo</strong>
+                  </div>
+                  <div className="notif-popover-header-actions">
+                    <button className="notif-popover-link-btn" type="button" onClick={markAllRead}>
+                      Đọc tất cả
+                    </button>
+                    <button className="notif-popover-close-btn" type="button" onClick={()=>setNotifDropdownOpen(false)} aria-label="Đóng">
+                      <X size={16}/>
+                    </button>
+                  </div>
+                </div>
 
+                <div className="notif-popover-list">
+                  {notes.busy ? (
+                    <div className="notif-popover-loading"><RefreshCw size={16} className="spin"/> Đang tải...</div>
+                  ) : !popoverItems.length ? (
+                    <div className="notif-popover-empty">Không có thông báo nào</div>
+                  ) : (
+                    popoverItems.slice(0, 8).map(item => {
+                      const { icon: Icon, colorClass, priority } = getNotifConfig(item);
+                      return (
+                        <div key={item.id} className={`notif-popover-card ${!item.is_read ? 'unread' : ''}`}>
+                          <div
+                            className="notif-popover-card-main"
+                            onClick={async () => {
+                              setNotifDropdownOpen(false);
+                              await openNotificationAfterAccessCheck(item, api, markRead, n);
+                            }}
+                          >
+                            <div className={`notif-popover-icon ${colorClass}`}>
+                              <Icon size={16}/>
+                            </div>
+                            <div className="notif-popover-body">
+                              <div className="notif-popover-card-head">
+                                <strong className="notif-popover-item-title">{item.title}</strong>
+                                {!item.is_read && <span className="notif-popover-unread-dot"/>}
+                              </div>
+                              <p className="notif-popover-item-desc">{item.message}</p>
+                              <div className="notif-popover-item-meta">
+                                <span>{formatNotifTime(item.created_at)}</span>
+                                <span className="notif-meta-status">{item.is_read ? 'Đã đọc' : 'Chưa đọc'}</span>
+                                <span className={`notif-priority-tag ${priority === 'Cao' ? 'high' : 'normal'}`}>{priority}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="notif-popover-card-actions">
+                            <button
+                              className="notif-pill-btn"
+                              type="button"
+                              onClick={async () => {
+                                setNotifDropdownOpen(false);
+                                await openNotificationAfterAccessCheck(item, api, markRead, n);
+                              }}
+                            >
+                              Xem chi tiết
+                            </button>
+                            {!item.is_read && (
+                              <button
+                                className="notif-pill-btn"
+                                type="button"
+                                onClick={() => markRead(item.id)}
+                              >
+                                Đánh dấu đã đọc
+                              </button>
+                            )}
+                            <button
+                              className="notif-pill-btn delete"
+                              type="button"
+                              onClick={() => setDismissedIds(prev => new Set([...prev, item.id]))}
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="notif-popover-footer">
+                  <div className="notif-popover-footer-top">
+                    <button
+                      className="notif-popover-link-btn"
+                      type="button"
+                      onClick={() => {
+                        const readIds = popoverItems.filter(i => i.is_read).map(i => i.id);
+                        setDismissedIds(prev => new Set([...prev, ...readIds]));
+                      }}
+                    >
+                      Xóa đã đọc
+                    </button>
+                    <span className="notif-popover-summary-text">
+                      Tổng: {popoverItems.length} · {unread} chưa đọc
+                    </span>
+                  </div>
+                  <button
+                    className="notif-popover-view-all-btn"
+                    type="button"
+                    onClick={() => {
+                      setNotifDropdownOpen(false);
+                      n('/notifications');
+                    }}
+                  >
+                    Xem tất cả
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="user-dropdown-container" ref={userDropdownRef}>
+            <button
+              className={`userchip ${userDropdownOpen ? 'active' : ''}`}
+              aria-haspopup="true"
+              aria-expanded={userDropdownOpen}
+              onClick={()=>setUserDropdownOpen(prev=>!prev)}
+              type="button"
+            >
+              <ProfileAvatar user={user}/>
+              <span className="userchip-name">{user.full_name}</span>
+              <ChevronDown size={15} className={`chevron-icon ${userDropdownOpen ? 'open' : ''}`}/>
+            </button>
+            {userDropdownOpen && (
+              <div className="user-dropdown-menu" role="menu">
+                <button
+                  className="user-dropdown-item"
+                  role="menuitem"
+                  type="button"
+                  onClick={()=>{setUserDropdownOpen(false);n('/profile');}}
+                >
+                  <UserCircle size={18}/>
+                  <span>Hồ sơ cá nhân</span>
+                </button>
+                <button
+                  className="user-dropdown-item"
+                  role="menuitem"
+                  type="button"
+                  onClick={()=>{setUserDropdownOpen(false);n('/notifications');}}
+                >
+                  <Bell size={18}/>
+                  <span>Thông báo</span>
+                </button>
+                <button
+                  className="user-dropdown-item logout"
+                  role="menuitem"
+                  type="button"
+                  onClick={()=>{setUserDropdownOpen(false);onLogout();}}
+                >
+                  <LogOut size={18}/>
+                  <span>Đăng xuất</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div><main className="content">{children}</main></div>
     </div>
@@ -280,21 +516,203 @@ function NotificationsPage(){
   const notificationState=useContext(NotificationContext);
   const {items,busy,error,markRead,markAllRead}=notificationState;
   const [message,setMessage]=useState('');
+  const [search,setSearch]=useState('');
+  const [tab,setTab]=useState('all');
+  const [dismissedIds,setDismissedIds]=useState(()=>new Set());
   const navigate=useNavigate();
+
+  const allItems=(items||[]).filter(item=>!dismissedIds.has(item.id));
+  const unreadCount=allItems.filter(i=>!i.is_read).length;
+  const readCount=allItems.filter(i=>i.is_read).length;
+
+  const filteredItems=allItems.filter(item=>{
+    if(tab==='unread'&&item.is_read)return false;
+    if(tab==='read'&&!item.is_read)return false;
+    if(search.trim()){
+      const q=search.toLowerCase();
+      const content=`${item.title||''} ${item.message||''}`.toLowerCase();
+      if(!content.includes(q))return false;
+    }
+    return true;
+  });
+
   async function openNotification(item){
     try{
       await openNotificationAfterAccessCheck(item,api,markRead,navigate);
     }catch(actionError){setMessage(actionError.message);}
   }
-  async function markAll(){try{await markAllRead();setMessage('');}catch(actionError){setMessage(actionError.message);}}
-  return <><Title title="Thông báo" description="Cập nhật tình hình chứng từ, phê duyệt và lịch công tác sắp tới." action={<button className="btn btn-muted" onClick={markAll}>Đánh dấu tất cả đã đọc</button>}/>
-    <section className="panel notif-list">{busy?<Loading/>:error?<p className="error">{error}</p>:(items||[]).map(item=><button className={'notif '+(!item.is_read?'unread':'')} key={item.id} onClick={()=>openNotification(item)}>
-      <Bell size={19}/><span><strong>{item.title}</strong><small>{item.message}</small><small className="notif-type">{notificationTypeLabel(item.type)}</small><small>{formatNotificationTimestamp(item.created_at)}</small></span>{!item.is_read&&<span className="unread-dot"/>}
-    </button>)}{!busy&&!error&&!items?.length&&<Empty label={String.fromCharCode(75,104,244,110,103,32,99,243,32,116,104,244,110,103,32,98,225,111)}/>}</section><Notice message={message} onDismiss={()=>setMessage('')}/></>;
-}
+  async function markAll(){
+    try{
+      await markAllRead();
+      setMessage('Đã đánh dấu tất cả thông báo là đã đọc');
+    }catch(actionError){setMessage(actionError.message);}
+  }
+  async function handleSingleMarkRead(id,e){
+    e.stopPropagation();
+    try{
+      await markRead(id);
+    }catch(actionError){setMessage(actionError.message);}
+  }
+  function handleDismiss(id,e){
+    e.stopPropagation();
+    setDismissedIds(prev=>new Set([...prev,id]));
+  }
+  function handleDeleteRead(){
+    const readIds=allItems.filter(i=>i.is_read).map(i=>i.id);
+    setDismissedIds(prev=>new Set([...prev,...readIds]));
+    setMessage('Đã xóa các thông báo đã đọc');
+  }
 
-function initials(name=''){return name.split(/\s+/).filter(Boolean).slice(-2).map(part=>part[0]).join('').toUpperCase()||'U'}
-function ProfileAvatar({user,className=''}){const[src,setSrc]=useState('');useEffect(()=>{let active=true,objectUrl='';if(!user.avatar_url){setSrc('');return}const version=encodeURIComponent(user.avatar_url);api('/profile/avatar?version='+version,{raw:true,headers:{'Cache-Control':'no-cache'}}).then(r=>r.blob()).then(blob=>{objectUrl=URL.createObjectURL(blob);if(active)setSrc(objectUrl);else URL.revokeObjectURL(objectUrl)}).catch(()=>{if(active)setSrc('')});return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)}},[user.avatar_url,user.id]);return <span className={'profile-photo '+className}>{src?<img src={src} alt=""/>:initials(user.full_name)}</span>}
+  const today=new Date();
+  const todayItems=[];
+  const earlierItems=[];
+  filteredItems.forEach(item=>{
+    const itemDate=item.created_at?new Date(item.created_at):null;
+    if(itemDate&&isSameDay(itemDate,today)){
+      todayItems.push(item);
+    }else{
+      earlierItems.push(item);
+    }
+  });
+
+  function renderNotifItem(item){
+    const {icon:Icon,colorClass,priority}=getNotifConfig(item);
+    return (
+      <div
+        key={item.id}
+        className={`notif-card-row ${!item.is_read?'unread':''}`}
+        onClick={()=>openNotification(item)}
+      >
+        <div className={`notif-type-icon ${colorClass}`}>
+          <Icon size={18}/>
+        </div>
+        <div className="notif-body">
+          <strong className="notif-title">{item.title}</strong>
+          <p className="notif-desc">{item.message}</p>
+        </div>
+        <div className="notif-meta-col" onClick={e=>e.stopPropagation()}>
+          <span className="notif-time">{formatNotifTime(item.created_at)}</span>
+          <span className={`notif-priority-tag ${priority==='Cao'?'high':'normal'}`}>{priority}</span>
+          <span className="notif-dot"/>
+          <button
+            className="notif-pill-btn"
+            type="button"
+            onClick={()=>openNotification(item)}
+          >
+            Xem chi tiết
+          </button>
+          {!item.is_read&&(
+            <button
+              className="notif-pill-btn"
+              type="button"
+              onClick={e=>handleSingleMarkRead(item.id,e)}
+            >
+              Đánh dấu đã đọc
+            </button>
+          )}
+          <button
+            className="notif-pill-btn delete"
+            type="button"
+            onClick={e=>handleDismiss(item.id,e)}
+          >
+            Xóa
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <>
+    <Title
+      title="Notifications"
+      description="Theo dõi hóa đơn, kết quả OCR, yêu cầu chỉnh sửa và lịch công tác của bạn."
+    />
+    <section className="panel notif-page-panel">
+      <div className="notif-toolbar">
+        <div className="notif-search-box">
+          <Search size={16}/>
+          <input
+            placeholder="Tìm hóa đơn, người duyệt..."
+            value={search}
+            onChange={e=>setSearch(e.target.value)}
+          />
+        </div>
+        <div className="notif-tabs">
+          <button
+            type="button"
+            className={`notif-tab ${tab==='all'?'active':''}`}
+            onClick={()=>setTab('all')}
+          >
+            Tất cả
+          </button>
+          <button
+            type="button"
+            className={`notif-tab ${tab==='unread'?'active':''}`}
+            onClick={()=>setTab('unread')}
+          >
+            Chưa đọc {unreadCount>0&&<span className="notif-tab-badge">{unreadCount}</span>}
+          </button>
+          <button
+            type="button"
+            className={`notif-tab ${tab==='read'?'active':''}`}
+            onClick={()=>setTab('read')}
+          >
+            Đã đọc {readCount>0&&<span className="notif-tab-badge">{readCount}</span>}
+          </button>
+        </div>
+      </div>
+
+      <div className="notif-subactions">
+        <button className="notif-text-btn" type="button" onClick={markAll}>
+          Đánh dấu đã đọc
+        </button>
+        <button className="notif-text-btn" type="button" onClick={handleDeleteRead}>
+          Xóa đã đọc
+        </button>
+      </div>
+
+      {busy ? (
+        <Loading/>
+      ) : error ? (
+        <p className="error">{error}</p>
+      ) : !filteredItems.length ? (
+        <Empty label="Không có thông báo nào"/>
+      ) : (
+        <div className="notif-sections">
+          {todayItems.length > 0 && (
+            <div className="notif-group">
+              <div className="notif-group-header">
+                <strong>Today</strong>
+                <span>
+                  {today.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </span>
+              </div>
+              <div className="notif-items-list">
+                {todayItems.map(renderNotifItem)}
+              </div>
+            </div>
+          )}
+
+          {earlierItems.length > 0 && (
+            <div className="notif-group">
+              <div className="notif-group-header">
+                <strong>Earlier</strong>
+              </div>
+              <div className="notif-items-list">
+                {earlierItems.map(renderNotifItem)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="notif-footer-summary">
+        <span>{allItems.length} thông báo · {unreadCount} chưa đọc · {readCount} đã đọc</span>
+      </div>
+    </section>
+    <Notice message={message} onDismiss={()=>setMessage('')}/>
+  </>;
+}
 const passwordRules=value=>value.length>=8&&/[A-Z]/.test(value)&&/[a-z]/.test(value)&&/\d/.test(value)&&/[^A-Za-z0-9]/.test(value);
 function ProfilePage({user,onRefresh}){
  const navigate=useNavigate();const {data:profile,reload:reloadProfile}=useLoad('/profile');const {data:invoices,busy,error,reload}=useLoad('/invoices?limit=250');
@@ -312,4 +730,38 @@ function InvoiceThumbnail({invoice}){const[src,setSrc]=useState(''),[kind,setKin
 function auditActionLabel(action){return ({'invoice.uploaded':'Tải hóa đơn lên','invoice.submitted':'Gửi hóa đơn phê duyệt','invoice.approved':'Phê duyệt hóa đơn','invoice.rejected':'Từ chối hóa đơn','schedule.created':'Tạo lịch công tác','schedule.updated':'Cập nhật lịch công tác','user.created':'Tạo người dùng','user.updated':'Cập nhật người dùng'})[action]||action}
 function auditEntityLabel(entity){return ({invoice:'Hóa đơn',schedule:'Lịch công tác',user:'Tài khoản'})[entity]||entity}
 function AuditPage(){const{data}=useLoad('/audit-logs');return <><Title title="Nhật ký kiểm toán" description="Theo dõi hoạt động bảo mật và quy trình trong hệ thống."/><section className="panel"><div className="table-scroll"><table><thead><tr><th>Sự kiện</th><th>Loại</th><th>Đối tượng</th><th>Mã người thực hiện</th><th>Thời gian</th></tr></thead><tbody>{(data||[]).map(a=><tr key={a.id}><td><strong>{auditActionLabel(a.action)}</strong></td><td>{auditEntityLabel(a.entity_type)}</td><td>#{a.entity_id||'—'}</td><td>{a.actor_id||'—'}</td><td>{datefmt(a.created_at)}</td></tr>)}</tbody></table>{!data?.length&&<Empty/>}</div></section></>}
-export default function App(){const[user,setUser]=useState(null),[loading,setLoading]=useState(!!authStore.get());const refresh=useCallback(async()=>{let u=await api('/auth/me');setUser(u)},[]);useEffect(()=>{if(authStore.get())refresh().catch(()=>{authStore.set(null);setUser(null)}).finally(()=>setLoading(false))},[refresh]);async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}authStore.set(null);setUser(null)}if(loading)return <Loading/>;if(!user)return <Login onLogin={setUser}/>;return <Shell user={user} onLogout={logout}><Routes><Route path="/people/:id" element={<EmployeeProfilePage/>}/><Route path="/search" element={<WorkspaceSearchPage/>}/><Route path="/" element={<HomePage user={user}/>}/><Route path="/invoices" element={<InvoicesPage/>}/><Route path="/invoices/:id" element={<DetailPage user={user}/>}/><Route path="/upload" element={user.role==='employee'?<UploadPage/>:<Navigate to="/invoices"/>}/><Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage/>:<Navigate to="/"/>}/><Route path="/schedule" element={<SchedulePage user={user}/>}/><Route path="/ranking" element={<RankingPage/>}/><Route path="/chat" element={<ChatPage/>}/><Route path="/reports" element={user.role!=='employee'?<ReportsPage/>:<Navigate to="/"/>}/><Route path="/users" element={user.role==='admin'?<UsersPage/>:<Navigate to="/"/>}/><Route path="/audit" element={user.role==='admin'?<AuditPage/>:<Navigate to="/"/>}/><Route path="/notifications" element={<NotificationsPage/>}/><Route path="/profile" element={<ProfilePage user={user} onRefresh={refresh}/>}/><Route path="*" element={<Navigate to="/"/>}/></Routes></Shell>}
+export default function App(){
+  const[user,setUser]=useState(null),[loading,setLoading]=useState(!!authStore.get());
+  const refresh=useCallback(async()=>{let u=await api('/auth/me');setUser(u)},[]);
+  useEffect(()=>{if(authStore.get())refresh().catch(()=>{authStore.set(null);setUser(null)}).finally(()=>setLoading(false))},[refresh]);
+  async function logout(){
+    if(typeof window!=='undefined'&&window.confirm&&!window.confirm('Bạn có chắc muốn đăng xuất?')){
+      return;
+    }
+    try{await api('/auth/logout',{method:'POST'})}catch{}
+    authStore.set(null);
+    setUser(null);
+  }
+  if(loading)return <Loading/>;
+  if(!user)return <Login onLogin={setUser}/>;
+  return <Shell user={user} onLogout={logout}>
+    <Routes>
+      <Route path="/people/:id" element={<EmployeeProfilePage/>}/>
+      <Route path="/search" element={<WorkspaceSearchPage/>}/>
+      <Route path="/" element={<HomePage user={user}/>}/>
+      <Route path="/invoices" element={<InvoicesPage/>}/>
+      <Route path="/invoices/:id" element={<DetailPage user={user}/>}/>
+      <Route path="/upload" element={user.role==='employee'?<UploadPage/>:<Navigate to="/invoices"/>}/>
+      <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage/>:<Navigate to="/"/>}/>
+      <Route path="/schedule" element={<SchedulePage user={user}/>}/>
+      <Route path="/ranking" element={<RankingPage/>}/>
+      <Route path="/chat" element={<ChatPage/>}/>
+      <Route path="/reports" element={user.role!=='employee'?<ReportsPage/>:<Navigate to="/"/>}/>
+      <Route path="/users" element={user.role==='admin'?<UsersPage/>:<Navigate to="/"/>}/>
+      <Route path="/audit" element={user.role==='admin'?<AuditPage/>:<Navigate to="/"/>}/>
+      <Route path="/notifications" element={<NotificationsPage/>}/>
+      <Route path="/profile" element={<ProfilePage user={user} onRefresh={refresh}/>}/>
+      <Route path="*" element={<Navigate to="/"/>}/>
+    </Routes>
+  </Shell>;
+}
