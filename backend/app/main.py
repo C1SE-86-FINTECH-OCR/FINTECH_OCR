@@ -733,11 +733,8 @@ def ensure_schedule_available(db,assigned_to,starts_at,ends_at,exclude_id=None):
 def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(current_user)):
     if user.role == 'accountant':
         fail('Kế toán chỉ có quyền xem lịch công tác, không có quyền tạo hoặc thay đổi lịch', 403)
-    if user.role == 'employee':
-        if data.assigned_to != user.id:
-            fail('Nhân viên chỉ có thể tự tạo và điều chỉnh lịch công tác của chính mình', 403)
-    elif user.role != 'admin':
-        fail('Không có quyền tạo lịch công tác', 403)
+    if user.role != 'admin':
+        fail('Chỉ có quản trị viên mới có quyền tạo và phân lịch công tác', 403)
     employee=db.get(User,data.assigned_to)
     if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
     starts_at=schedule_datetime(data.starts_at);ends_at=schedule_datetime(data.ends_at)

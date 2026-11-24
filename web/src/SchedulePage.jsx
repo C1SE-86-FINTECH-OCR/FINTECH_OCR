@@ -38,7 +38,7 @@ export default function SchedulePage({ user }) {
   const isAdmin = user.role === 'admin';
   const isAccountant = user.role === 'accountant';
   const isEmployee = user.role === 'employee';
-  const canCreate = isAdmin || isEmployee;
+  const canCreate = isAdmin;
   const canFilterEmployees = isAdmin || isAccountant;
   const [items, setItems] = useState([]), [employees, setEmployees] = useState([]);
   const [anchor, setAnchor] = useState(() => fromKey(dateKey(new Date()))), [view, setView] = useState('month');
@@ -175,7 +175,7 @@ export default function SchedulePage({ user }) {
 
   return <div className="schedule-page">
     <header className="pagehead schedule-page-head"><div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>{pageTitle}</h1><p>{pageDescription}</p></div>
-      {canCreate ? <button className="btn btn-primary" onClick={() => openCreate()}><Plus size={17}/>{isAdmin ? 'Phân công công tác' : 'Tạo lịch công tác'}</button> : <span className="schedule-view-only"><Eye size={16}/>Kế toán chỉ xem</span>}
+      {isAdmin ? <button className="btn btn-primary" onClick={() => openCreate()}><Plus size={17}/>Phân công công tác</button> : isAccountant ? <span className="schedule-view-only"><Eye size={16}/>Kế toán chỉ xem</span> : null}
     </header>
 
     <div className="schedule-toolbar">

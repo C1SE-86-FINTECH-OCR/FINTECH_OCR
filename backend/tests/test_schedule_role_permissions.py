@@ -29,32 +29,33 @@ def test_schedule_role_permissions(api_env):
     assert resp.status_code == 403
     assert "Kế toán chỉ có quyền xem" in resp.json()["detail"]
 
-    # 2. Employee cannot create schedule for another employee (403)
+    # 2. Employee cannot create schedule even for themselves (403)
     resp = client.post(
         "/api/v1/schedules",
         headers={"Authorization": f"Bearer {emp1}"},
         json={
-            "title": "Emp1 assigns Emp2",
-            "destination": "HCM",
-            "starts_at": (now + timedelta(days=12)).isoformat(),
-            "ends_at": (now + timedelta(days=13)).isoformat(),
-            "assigned_to": emp2_id,
-        },
-    )
-    assert resp.status_code == 403
-    assert "chính mình" in resp.json()["detail"]
-
-    # 3. Employee can create schedule for themselves (201)
-    resp = client.post(
-        "/api/v1/schedules",
-        headers={"Authorization": f"Bearer {emp1}"},
-        json={
-            "title": "Emp1 own trip",
+            "title": "Emp1 own trip attempt",
             "destination": "Da Nang",
             "starts_at": (now + timedelta(days=14)).isoformat(),
             "ends_at": (now + timedelta(days=15)).isoformat(),
             "assigned_to": emp1_id,
             "notes": "My self-scheduled trip",
+        },
+    )
+    assert resp.status_code == 403
+    assert "quản trị viên" in resp.json()["detail"].lower()
+
+    # 3. Admin creates schedule assigned to Employee (201)
+    resp = client.post(
+        "/api/v1/schedules",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "title": "Admin assigned trip to Emp1",
+            "destination": "Da Nang",
+            "starts_at": (now + timedelta(days=14)).isoformat(),
+            "ends_at": (now + timedelta(days=15)).isoformat(),
+            "assigned_to": emp1_id,
+            "notes": "Admin assigned trip",
         },
     )
     assert resp.status_code == 201

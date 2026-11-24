@@ -132,6 +132,23 @@ def _token(client, email, password):
     return response.json()["access_token"]
 
 
+try:
+    from zoneinfo import ZoneInfo
+    VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+except Exception:
+    VN_TZ = timezone(timedelta(hours=7))
+
+
+def to_vn_date_str(value):
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+    else:
+        parsed = value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(VN_TZ).date().isoformat()
+
+
 def test_invoice_list_search_and_offset_pagination(api_env):
     client, users, password = api_env
     token = _token(client, "employee1@phase2.test", password)
@@ -1442,9 +1459,9 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
         json=body,
         headers={"Authorization": f"Bearer {accountant}"},
     )
-    employee_other_denied = client.post(
+    employee_denied = client.post(
         "/api/v1/schedules",
-        json={**body, "assigned_to": users["employee2@phase2.test"]},
+        json=body,
         headers={"Authorization": f"Bearer {employee_one}"},
     )
     created = client.post(
@@ -1453,15 +1470,15 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
         headers={"Authorization": f"Bearer {admin}"},
     )
     assert accountant_denied.status_code == 403
-    assert employee_other_denied.status_code == 403
+    assert employee_denied.status_code == 403
     assert created.status_code == 201
     def normalized_utc(value):
         parsed = datetime.fromisoformat(value)
         return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
     assert normalized_utc(created.json()["starts_at"]) == normalized_utc(body["starts_at"])
     assert normalized_utc(created.json()["ends_at"]) == normalized_utc(body["ends_at"])
-    assert created.json()["start_date"] == body["starts_at"][:10]
-    assert created.json()["end_date"] == body["ends_at"][:10]
+    assert created.json()["start_date"] == to_vn_date_str(body["starts_at"])
+    assert created.json()["end_date"] == to_vn_date_str(body["ends_at"])
     invalid_schedule = client.post(
         "/api/v1/schedules",
         json={**body, "ends_at": body["starts_at"]},
