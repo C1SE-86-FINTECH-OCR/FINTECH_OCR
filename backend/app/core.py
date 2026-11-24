@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
     access_token_minutes: int = 480
     app_env: str = 'development'
+    gemini_api_key: str = ''
+    gemini_model: str = 'gemini-3.1-flash-lite'
 settings=Settings()
 if settings.app_env == 'production' and settings.jwt_secret.startswith('dev-only'):
     raise RuntimeError('Set a secure JWT_SECRET before production')
