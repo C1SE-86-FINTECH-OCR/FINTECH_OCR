@@ -1437,17 +1437,23 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
         "assigned_to": users["employee1@phase2.test"],
     }
 
-    denied = client.post(
+    accountant_denied = client.post(
         "/api/v1/schedules",
         json=body,
+        headers={"Authorization": f"Bearer {accountant}"},
+    )
+    employee_other_denied = client.post(
+        "/api/v1/schedules",
+        json={**body, "assigned_to": users["employee2@phase2.test"]},
         headers={"Authorization": f"Bearer {employee_one}"},
     )
     created = client.post(
         "/api/v1/schedules",
         json=body,
-        headers={"Authorization": f"Bearer {accountant}"},
+        headers={"Authorization": f"Bearer {admin}"},
     )
-    assert denied.status_code == 403
+    assert accountant_denied.status_code == 403
+    assert employee_other_denied.status_code == 403
     assert created.status_code == 201
     def normalized_utc(value):
         parsed = datetime.fromisoformat(value)
@@ -1459,24 +1465,36 @@ def test_schedule_permissions_notifications_and_ranking(api_env):
     invalid_schedule = client.post(
         "/api/v1/schedules",
         json={**body, "ends_at": body["starts_at"]},
-        headers={"Authorization": f"Bearer {accountant}"},
+        headers={"Authorization": f"Bearer {admin}"},
     )
     assert invalid_schedule.status_code == 400
     schedule_id = created.json()["id"]
     conflict = client.post(
         "/api/v1/schedules",
         json={**body, "title": "Overlapping test trip"},
-        headers={"Authorization": f"Bearer {accountant}"},
+        headers={"Authorization": f"Bearer {admin}"},
     )
     assert conflict.status_code == 409
+    accountant_patch_denied = client.patch(
+        f"/api/v1/schedules/{schedule_id}",
+        json={"notes": "Accountant edit attempt"},
+        headers={"Authorization": f"Bearer {accountant}"},
+    )
+    assert accountant_patch_denied.status_code == 403
     changed = client.patch(
         f"/api/v1/schedules/{schedule_id}",
         json={"notes": "Bring the reconciliation file", "destination": "Updated Test City"},
-        headers={"Authorization": f"Bearer {accountant}"},
+        headers={"Authorization": f"Bearer {admin}"},
     )
     assert changed.status_code == 200
     assert changed.json()["notes"] == "Bring the reconciliation file"
     assert changed.json()["destination"] == "Updated Test City"
+    employee_self_edit = client.patch(
+        f"/api/v1/schedules/{schedule_id}",
+        json={"notes": "Bring the reconciliation file"},
+        headers={"Authorization": f"Bearer {employee_one}"},
+    )
+    assert employee_self_edit.status_code == 200
     employee_one_schedules = client.get(
         "/api/v1/schedules", headers={"Authorization": f"Bearer {employee_one}"}
     ).json()
@@ -1616,8 +1634,10 @@ def test_notification_unread_count_is_exact_and_recipient_scoped_beyond_list_lim
 
 def test_cancelled_schedule_cannot_be_restored_over_an_active_conflict(api_env):
     client, users, password = api_env
+    admin = _token(client, "admin@phase2.test", password)
     accountant = _token(client, "accountant@phase2.test", password)
-    headers = {"Authorization": f"Bearer {accountant}"}
+    admin_headers = {"Authorization": f"Bearer {admin}"}
+    accountant_headers = {"Authorization": f"Bearer {accountant}"}
     starts = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(days=8)
     target_body = {
         "title": "Cancelled trip to restore",
@@ -1626,10 +1646,10 @@ def test_cancelled_schedule_cannot_be_restored_over_an_active_conflict(api_env):
         "ends_at": (starts + timedelta(hours=4)).isoformat(),
         "assigned_to": users["employee1@phase2.test"],
     }
-    target = client.post("/api/v1/schedules", json=target_body, headers=headers)
+    target = client.post("/api/v1/schedules", json=target_body, headers=admin_headers)
     assert target.status_code == 201
     trip_id = target.json()["id"]
-    assert client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "cancelled"}, headers=headers).status_code == 200
+    assert client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "cancelled"}, headers=admin_headers).status_code == 200
 
     blocker_body = {
         **target_body,
@@ -1637,17 +1657,17 @@ def test_cancelled_schedule_cannot_be_restored_over_an_active_conflict(api_env):
         "starts_at": (starts + timedelta(hours=1)).isoformat(),
         "ends_at": (starts + timedelta(hours=2)).isoformat(),
     }
-    blocker = client.post("/api/v1/schedules", json=blocker_body, headers=headers)
+    blocker = client.post("/api/v1/schedules", json=blocker_body, headers=admin_headers)
     assert blocker.status_code == 201
 
-    conflict = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=headers)
+    conflict = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=admin_headers)
     assert conflict.status_code == 409
-    assert "tr\u00f9ng th\u1eddi gian" in conflict.json()["detail"]
-    current = client.get("/api/v1/schedules", headers=headers).json()
+    assert "trùng thời gian" in conflict.json()["detail"]
+    current = client.get("/api/v1/schedules", headers=accountant_headers).json()
     assert next(item for item in current if item["id"] == trip_id)["status"] == "cancelled"
 
-    assert client.patch(f"/api/v1/schedules/{blocker.json()['id']}", json={"status": "cancelled"}, headers=headers).status_code == 200
-    restored = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=headers)
+    assert client.patch(f"/api/v1/schedules/{blocker.json()['id']}", json={"status": "cancelled"}, headers=admin_headers).status_code == 200
+    restored = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=admin_headers)
     assert restored.status_code == 200 and restored.json()["status"] == "planned"
 
 
@@ -1664,12 +1684,14 @@ def test_multiday_schedule_conflict_and_ranking_count_one_trip(api_env):
         "ends_at": (starts + timedelta(days=2, hours=8)).isoformat(),
         "assigned_to": users["employee1@phase2.test"],
     }
-    headers = {"Authorization": f"Bearer {accountant}"}
-    created = client.post("/api/v1/schedules", json=body, headers=headers)
+    admin_headers = {"Authorization": f"Bearer {admin}"}
+    accountant_headers = {"Authorization": f"Bearer {accountant}"}
+    created = client.post("/api/v1/schedules", json=body, headers=admin_headers)
     assert created.status_code == 201
     assigned_headers = {"Authorization": f"Bearer {employee}"}
     assert created.json()["start_date"] < created.json()["end_date"]
     assert sum(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=assigned_headers).json()) == 1
+    assert any(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=accountant_headers).json())
 
     middle_day_start = starts + timedelta(days=1, hours=2)
     conflict = client.post("/api/v1/schedules", json={
@@ -1677,7 +1699,7 @@ def test_multiday_schedule_conflict_and_ranking_count_one_trip(api_env):
         "title": "Trip during middle day",
         "starts_at": middle_day_start.isoformat(),
         "ends_at": (middle_day_start + timedelta(hours=1)).isoformat(),
-    }, headers=headers)
+    }, headers=admin_headers)
     assert conflict.status_code == 409
 
     completed = client.patch(f"/api/v1/schedules/{created.json()['id']}", json={"status": "completed"}, headers={"Authorization": f"Bearer {admin}"})
@@ -1689,7 +1711,7 @@ def test_multiday_schedule_conflict_and_ranking_count_one_trip(api_env):
 
 def test_schedule_cannot_be_assigned_to_disabled_employee(api_env):
     client, users, password = api_env
-    accountant = _token(client, "accountant@phase2.test", password)
+    admin = _token(client, "admin@phase2.test", password)
     with client.app.state.phase2_test_session() as db:
         disabled = db.get(User, users["employee2@phase2.test"])
         disabled.status = "disabled"
@@ -1697,7 +1719,7 @@ def test_schedule_cannot_be_assigned_to_disabled_employee(api_env):
     now = datetime.now(timezone.utc)
     response = client.post(
         "/api/v1/schedules",
-        headers={"Authorization": f"Bearer {accountant}"},
+        headers={"Authorization": f"Bearer {admin}"},
         json={
             "title": "Synthetic trip",
             "destination": "Test City",
