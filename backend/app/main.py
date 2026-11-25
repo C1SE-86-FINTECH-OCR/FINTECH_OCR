@@ -295,7 +295,7 @@ def logout(credentials:HTTPAuthorizationCredentials=Depends(bearer),user=Depends
 def users(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):return [ser(u) for u in db.scalars(select(User).order_by(User.id)).all()]
 @app.get('/api/v1/directory/employees')
 def directory_employees(db:Session=Depends(db_session),user=Depends(require_roles('admin','accountant'))):
-    return [ser(u) for u in db.scalars(select(User).where(User.role=='employee',User.status=='active').order_by(User.full_name)).all()]
+    return [ser(u) for u in db.scalars(select(User).where(User.role.in_(['employee','accountant']),User.status=='active').order_by(User.full_name)).all()]
 
 def employee_profile_data(target,viewer,scores):
     score=next(((index+1,row['completed']) for index,row in enumerate(scores) if row['user_id']==target.id),None)
@@ -854,14 +854,23 @@ def read_all(db:Session=Depends(db_session),user=Depends(current_user)):
 @app.get('/api/v1/schedules')
 def schedules(assigned_to:int|None=None,status:str='',db:Session=Depends(db_session),user=Depends(current_user)):
     q=select(Schedule).order_by(Schedule.starts_at)
-    if user.role=='employee':
-        if assigned_to is not None and assigned_to!=user.id:fail('Bạn chỉ được xem lịch công tác của mình',403)
-        q=q.where(Schedule.assigned_to==user.id)
-    elif assigned_to is not None:q=q.where(Schedule.assigned_to==assigned_to)
+    if user.role != 'admin':
+        if assigned_to is not None and assigned_to != user.id:
+            fail('Bạn chỉ được xem lịch công tác của mình', 403)
+        q=q.where(Schedule.assigned_to == user.id)
+    elif assigned_to is not None:
+        q=q.where(Schedule.assigned_to == assigned_to)
     if status:
         if status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ',422)
         q=q.where(Schedule.status==status)
     return [schedule_ser(s,db) for s in db.scalars(q).all()]
+@app.get('/api/v1/schedules/{schedule_id}')
+def schedule_detail(schedule_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    s=db.get(Schedule,schedule_id)
+    if not s:fail('Không tìm thấy lịch',404)
+    if user.role != 'admin' and s.assigned_to != user.id:
+        fail('Bạn chỉ được xem lịch công tác của mình',403)
+    return schedule_ser(s,db)
 def schedule_ser(s,db):
     u=db.get(User,s.assigned_to)
     creator=db.get(User,s.created_by)
@@ -885,7 +894,7 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
     if user.role != 'admin':
         fail('Chỉ có quản trị viên mới có quyền tạo và phân lịch công tác', 403)
     employee=db.get(User,data.assigned_to)
-    if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    if not employee or employee.role not in ('employee','accountant') or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên hoặc kế toán đang hoạt động')
     starts_at=schedule_datetime(data.starts_at);ends_at=schedule_datetime(data.ends_at)
     if ends_at<=starts_at:fail('Thời gian kết thúc phải sau thời gian bắt đầu')
     ensure_schedule_available(db,employee.id,starts_at,ends_at)
@@ -919,7 +928,7 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
     if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)
     old_assigned=s.assigned_to;previous_status=s.status
     employee=db.get(User,body.assigned_to) if body.assigned_to is not None else None
-    if body.assigned_to is not None and (not employee or employee.role!='employee' or employee.status!='active'):fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    if body.assigned_to is not None and (not employee or employee.role not in ('employee','accountant') or employee.status!='active'):fail('Chỉ có thể giao lịch cho nhân viên hoặc kế toán đang hoạt động')
     if body.status is not None and body.status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ')
     starts_at=schedule_datetime(body.starts_at) if body.starts_at is not None else schedule_db_datetime(s.starts_at)
     ends_at=schedule_datetime(body.ends_at) if body.ends_at is not None else schedule_db_datetime(s.ends_at)

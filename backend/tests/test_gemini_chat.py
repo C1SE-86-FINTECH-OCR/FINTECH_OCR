@@ -128,7 +128,7 @@ def test_gemini_payload_contract_does_not_accept_question_or_database_records(mo
     models = FakeModels()
     monkeypatch.setattr(gemini_chat, '_client', type('Client', (), {'models': models})())
     assert gemini_chat.answer_for({'domain':'invoice','metric':'count','format':'text','scope':'personal'}, {'invoice_count': 2}) == 'TÃ¡Â»â€¢ng sÃ¡Â»â€˜ hÃƒÂ³a Ã„â€˜Ã†Â¡n lÃƒÂ  2.'
-    prompt = models.kwargs['contents']
+    prompt = "".join(str(p) for p in models.kwargs['contents'])
     assert 'question' not in prompt and 'vendor' not in prompt
     assert 'authorized_aggregates' in prompt and '2' in prompt
 
@@ -151,6 +151,7 @@ def test_gemini_sdk_timeout_is_configured_in_milliseconds(monkeypatch):
 
 
 def test_gemini_retries_503_twice_with_exponential_backoff_then_recovers(monkeypatch):
+    monkeypatch.setattr(core.settings, 'gemini_api_key', 'test-key')
     class FlakyModels:
         calls = 0
         def generate_content(self, **kwargs):
@@ -168,6 +169,7 @@ def test_gemini_retries_503_twice_with_exponential_backoff_then_recovers(monkeyp
 
 
 def test_gemini_recovers_from_temporary_network_error(monkeypatch):
+    monkeypatch.setattr(core.settings, 'gemini_api_key', 'test-key')
     import httpx
     class NetworkModels:
         calls=0
@@ -183,6 +185,7 @@ def test_gemini_recovers_from_temporary_network_error(monkeypatch):
 
 
 def test_persistent_503_stops_after_two_retries(monkeypatch):
+    monkeypatch.setattr(core.settings, 'gemini_api_key', 'test-key')
     class PersistentModels:
         calls=0
         def generate_content(self, **kwargs):
@@ -233,6 +236,7 @@ def test_persistent_503_stops_after_two_retries_and_falls_back(api_env, monkeypa
     assert '1.000' in response.json()['answer']
 
 def test_gemini_errors_are_classified_without_exposing_provider_details(monkeypatch):
+    monkeypatch.setattr(core.settings, 'gemini_api_key', 'test-key')
     class FailingModels:
         def __init__(self, exc): self.exc = exc; self.calls=0
         def generate_content(self, **kwargs): self.calls+=1; raise self.exc
@@ -281,7 +285,7 @@ def test_chat_security_rejection_blocks_injection_and_keys(api_env):
 def test_chat_stream_returns_sse_meta_delta_done_events(api_env, monkeypatch):
     client, users, password = api_env
     headers = {'Authorization': f"Bearer {_token(client, 'employee1@phase2.test', password)}"}
-    async def mock_stream_general(question, history=None):
+    async def mock_stream_general(question, history=None, **kwargs):
         yield 'Xin chào, '
         yield 'tôi có thể giúp bạn!'
     monkeypatch.setattr(gemini_chat, 'stream_general', mock_stream_general)
