@@ -883,6 +883,8 @@
 .chat-sources-label{color:#808288;font-weight:600}
 .chat-source-tag{display:inline-flex;align-items:center;gap:4px;background:#f1f2f4;border:1px solid #e0e1e5;border-radius:7px;padding:3px 8px;color:#27282b;font-weight:600;font-size:11px;text-decoration:none;transition:background .15s}
 .chat-source-tag:hover{background:#e4e5e8}
+.chat-source-tag-web{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.chat-source-tag-web:hover{background:#dbeafe;color:#1e40af}
 
 .chat-assistant-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid #f2f2f4;font-size:11px;color:#8c8e96;flex-wrap:wrap;gap:8px}
 .chat-action-buttons{display:flex;align-items:center;gap:6px}
@@ -915,6 +917,14 @@
 .chat-send-btn:hover{background:#33353a}
 .chat-send-btn:disabled{background:#e2e4e8;color:#9ca3af;cursor:not-allowed}
 .chat-disclaimer{text-align:center;font-size:11px;color:#9ca3af;margin-top:8px}
+
+/* Dashboard AI Card Input */
+.black-input-form{background:#343537;border:1px solid #525353;border-radius:11px;display:flex;align-items:center;justify-content:space-between;padding:3px 6px 3px 14px;margin-top:14px;width:100%;transition:border-color .15s,box-shadow .15s}
+.black-input-form:focus-within{border-color:#8e9095;box-shadow:0 0 0 2px rgba(255,255,255,.1)}
+.black-input-field{flex:1;background:transparent !important;border:none !important;outline:none !important;color:#fff !important;font-size:13px;padding:8px 0;box-shadow:none !important;min-width:0}
+.black-input-field::placeholder{color:#8e9095}
+.black-input-submit{background:transparent;border:none;color:#c3c3c3;display:flex;align-items:center;justify-content:center;padding:7px;border-radius:8px;cursor:pointer;transition:color .15s,background .15s}
+.black-input-submit:hover{color:#fff;background:rgba(255,255,255,.1)}
 
 @media(max-width:960px){
   .chat-layout{grid-template-columns:1fr;height:auto}

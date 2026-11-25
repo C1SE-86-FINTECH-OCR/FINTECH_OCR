@@ -1132,6 +1132,7 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
     facts={};display_labels={}
     mode='gemini-aggregates';fallback_reason=None;gemini_connected=None
 
+    web_sources = []
     if kind=='security':
         mode='security-refusal'
         answer=SECURITY_REFUSAL
@@ -1139,9 +1140,16 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
         mode='gemini-general'
         t_llm0 = time.perf_counter()
         try:
-            answer=gemini_chat.general_answer(effective_question,history=chat_history,image_bytes=image_bytes,mime_type=mime_type)
-            gemini_connected=True
-            llm_time=round((time.perf_counter()-t_llm0)*1000,1)
+            import inspect
+            call_params = inspect.signature(gemini_chat.general_answer).parameters
+            call_kwargs: dict[str, Any] = {}
+            if 'history' in call_params: call_kwargs['history'] = chat_history
+            if 'image_bytes' in call_params and image_bytes: call_kwargs['image_bytes'] = image_bytes
+            if 'mime_type' in call_params and image_bytes: call_kwargs['mime_type'] = mime_type
+            if 'sources_collector' in call_params: call_kwargs['sources_collector'] = web_sources
+            answer = gemini_chat.general_answer(effective_question, **call_kwargs)
+            gemini_connected = True
+            llm_time = round((time.perf_counter() - t_llm0) * 1000, 1)
         except gemini_chat.GeminiUnavailable as exc:
             mode='general-fallback';fallback_reason=exc.code;gemini_connected=False
             answer=gemini_chat.friendly_error(exc.code)
@@ -1186,18 +1194,20 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
     db.add_all([ChatMessage(conversation_id=conversation.id,role='user',content=user_content),ChatMessage(conversation_id=conversation.id,role='assistant',content=answer)])
     db.commit()
     total_time=round((time.perf_counter()-t_start)*1000,1)
-    return {'answer':answer,'mode':mode,'kind':kind,'fallback_reason':fallback_reason,
-            'gemini_connected':gemini_connected,'conversation_id':conversation.id,
-            'db_time_ms':db_time,'llm_time_ms':llm_time,'total_time_ms':total_time,
-            'model':gemini_chat.active_model_name()}
-    db.add_all([ChatMessage(conversation_id=conversation.id,role='user',content=body.question),ChatMessage(conversation_id=conversation.id,role='assistant',content=answer)])
-    db.commit()
-    total_time=round((time.perf_counter()-t_start)*1000,1)
-    return {'answer':answer,'mode':mode,'kind':kind,'fallback_reason':fallback_reason,
-            'gemini_connected':gemini_connected,'conversation_id':conversation.id,
-            'count_visible_invoices':facts.get('invoice_count'),
-            'model':gemini_chat.active_model_name(),
-            'db_time_ms':db_time,'llm_time_ms':llm_time,'total_time_ms':total_time}
+    return {
+        'answer': answer,
+        'mode': mode,
+        'kind': kind,
+        'fallback_reason': fallback_reason,
+        'gemini_connected': gemini_connected,
+        'conversation_id': conversation.id,
+        'count_visible_invoices': facts.get('invoice_count'),
+        'model': gemini_chat.active_model_name(),
+        'web_sources': web_sources if kind == 'ordinary' else [],
+        'db_time_ms': db_time,
+        'llm_time_ms': llm_time,
+        'total_time_ms': total_time,
+    }
 
 @contextmanager
 def get_chat_db():
@@ -1284,8 +1294,16 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
             if kind=='ordinary' or image_bytes:
                 yield f"event: meta\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','model':gemini_chat.active_model_name(),'db_time_ms':0},ensure_ascii=False)}\n\n"
                 t_llm0=time.perf_counter()
+                web_sources = []
                 try:
-                    async for fragment in gemini_chat.stream_general(effective_question,history=chat_history,image_bytes=image_bytes,mime_type=mime_type):
+                    import inspect
+                    gen_params = inspect.signature(gemini_chat.stream_general).parameters
+                    gen_kwargs: dict[str, Any] = {}
+                    if 'history' in gen_params: gen_kwargs['history'] = chat_history
+                    if 'image_bytes' in gen_params and image_bytes: gen_kwargs['image_bytes'] = image_bytes
+                    if 'mime_type' in gen_params and image_bytes: gen_kwargs['mime_type'] = mime_type
+                    if 'sources_collector' in gen_params: gen_kwargs['sources_collector'] = web_sources
+                    async for fragment in gemini_chat.stream_general(effective_question, **gen_kwargs):
                         if await request.is_disconnected():
                             break
                         if ttft_ms is None:
@@ -1302,7 +1320,7 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
                 t_end=time.perf_counter()
                 llm_time=round((t_end-t_llm0)*1000,1)
                 tot=round((t_end-t0)*1000,1)
-                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','ttft_ms':ttft_ms or tot,'llm_time_ms':llm_time,'total_time_ms':tot,'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','ttft_ms':ttft_ms or tot,'llm_time_ms':llm_time,'total_time_ms':tot,'model':gemini_chat.active_model_name(),'web_sources':web_sources},ensure_ascii=False)}\n\n"
                 user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
                 db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=final_answer)])
                 db.commit()

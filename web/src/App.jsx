@@ -2,7 +2,7 @@ import InvoiceDateFilter from './InvoiceDateFilter.jsx';
 import {invoiceDateRange} from './invoiceDateFilter.js';
 import React,{createContext,useContext,useRef,useState,useEffect,useCallback} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
-import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark} from 'lucide-react';
+import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark,Globe} from 'lucide-react';
 import {api,authStore,money,datefmt,roleName,approvalName,documentTypeName,ROOT} from './api';
 import SpendingChart from './SpendingChart';
 import QuickInvoiceSearch from './QuickInvoiceSearch';
@@ -358,6 +358,7 @@ function HomePage({ user }) {
   const inv = useLoad('/invoices');
   const sched = useLoad('/schedules');
   const navigate = useNavigate();
+  const [chatPrompt, setChatPrompt] = useState('');
   const summary = data || {};
   const employee = user.role === 'employee';
   const stats = [
@@ -366,6 +367,16 @@ function HomePage({ user }) {
     ["Chờ phê duyệt", summary.pending, Clock3, 'pending'],
     ["Đã từ chối", summary.rejected, XCircle, 'rejected'],
   ];
+
+  function handleChatSubmit(e){
+    e.preventDefault();
+    const q=chatPrompt.trim();
+    if(q){
+      navigate('/chat',{state:{initialQuestion:q}});
+    }else{
+      navigate('/chat');
+    }
+  }
 
   return <>
     <Title
@@ -406,7 +417,29 @@ function HomePage({ user }) {
             {!sched.data?.length && <Empty label="Chưa có lịch công tác"/>}
           </div>
         </section>
-        <section className="panel black-panel"><MessageSquare size={21}/><h3>Trao đổi về hóa đơn</h3><p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p><button onClick={() => navigate('/chat')} className="black-input">Nhập câu hỏi...<ArrowRight size={18}/></button></section>
+        <section className="panel black-panel">
+          <MessageSquare size={21}/>
+          <h3>Trao đổi về hóa đơn</h3>
+          <p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p>
+          <form className="black-input-form" onSubmit={handleChatSubmit}>
+            <input
+              type="text"
+              className="black-input-field"
+              placeholder="Nhập câu hỏi..."
+              value={chatPrompt}
+              onChange={e=>setChatPrompt(e.target.value)}
+              aria-label="Nhập câu hỏi cho trợ lý AI"
+            />
+            <button
+              type="submit"
+              className="black-input-submit"
+              title="Gửi câu hỏi đến Trợ lý AI"
+              aria-label="Gửi câu hỏi"
+            >
+              <ArrowRight size={18}/>
+            </button>
+          </form>
+        </section>
       </div>
     </>}
   </>;
@@ -667,11 +700,12 @@ function compressImage(file,maxDimension=1280,quality=0.85){
 }
 
 function ChatPage({user}){
+  const location=useLocation();
+  const [params,setParams]=useSearchParams();
+  const lastSentInitRef=useRef('');
   const [question,setQuestion]=useState('');
   const [attachedImage,setAttachedImage]=useState(null);
-  const [messages,setMessages]=useState([
-    {role:'assistant',content:'Xin chào! Tôi là trợ lý AI thông minh của **FINTECH OCR**. Bạn có thể hỏi tôi về hóa đơn, lịch công tác trong hệ thống hoặc các câu hỏi phân tích, kiến thức phổ thông, toán học và lập trình.'}
-  ]);
+  const [messages,setMessages]=useState([]);
   const [sending,setSending]=useState(false);
   const [streamingText,setStreamingText]=useState('');
   const [connection,setConnection]=useState(null);
@@ -762,10 +796,7 @@ function ChatPage({user}){
     setConversationId(null);
     setActiveTitle('Cuộc trò chuyện mới');
     setActiveDate('');
-    setMessages([{
-      role:'assistant',
-      content:'Xin chào! Tôi là trợ lý AI thông minh của **FINTECH OCR**. Bạn có thể hỏi tôi về hóa đơn, lịch công tác trong hệ thống hoặc các câu hỏi phân tích, kiến thức phổ thông, toán học và lập trình.'
-    }]);
+    setMessages([]);
     setQuestion('');
     setAttachedImage(null);
   }
@@ -921,6 +952,24 @@ function ChatPage({user}){
     }
   }
 
+  useEffect(()=>{
+    const initQ=(location.state?.initialQuestion||params.get('q')||'').trim();
+    if(initQ&&lastSentInitRef.current!==initQ){
+      lastSentInitRef.current=initQ;
+      if(location.state?.initialQuestion){
+        window.history.replaceState({},document.title);
+      }
+      if(params.get('q')){
+        setParams(p=>{
+          const next=new URLSearchParams(p);
+          next.delete('q');
+          return next;
+        },{replace:true});
+      }
+      submitWithText(initQ);
+    }
+  },[location.state,params]);
+
   function submit(e){
     e.preventDefault();
     submitWithText(question);
@@ -951,12 +1000,6 @@ function ChatPage({user}){
 
   const {today,last7,older}=groupConvs(conversations);
 
-  const SUGGESTED_CHIPS=[
-    'Phân tích theo nhân viên',
-    'So sánh với tháng trước',
-    'Xem danh sách hóa đơn cần duyệt',
-    'Thống kê chi phí theo nhà cung cấp'
-  ];
 
   const connectionLabel=!connection?'Đang kiểm tra kết nối Gemini…':connection.connected?`Gemini đã sẵn sàng · ${connection.model}`:connection.state==='not_configured'?'Chưa cấu hình Gemini':'Gemini tạm thời ngoại tuyến (sử dụng chế độ dữ liệu nội bộ)';
 
@@ -1107,27 +1150,52 @@ function ChatPage({user}){
               );
             }
 
-            const sources=extractSources(m.content);
+            const internalSources=extractSources(m.content);
+            const webSources=m.meta?.web_sources||[];
+            const hasInternalData=(m.meta&&m.meta.kind&&m.meta.kind!=='ordinary'&&(m.meta.db_time_ms>0||m.meta.count_visible_invoices!=null));
+            const isVerified=internalSources.length>0||webSources.length>0||hasInternalData;
 
             return (
               <div className="chat-row-assistant" key={i}>
                 <div className="chat-assistant-head">
                   <Sparkles size={16} color="#2563eb"/>
                   <span>Fintech AI</span>
-                  <span className="chat-source-verified-badge">Nguồn đã xác thực</span>
+                  {isVerified&&(
+                    <span className="chat-source-verified-badge" title="Thông tin có căn cứ xác minh từ hệ thống hoặc nguồn tra cứu">
+                      Nguồn đã xác thực
+                    </span>
+                  )}
                 </div>
 
                 <div className="chat-assistant-body">
                   <ChatMarkdown>{m.content}</ChatMarkdown>
                 </div>
 
-                {sources.length>0&&(
+                {(internalSources.length>0||webSources.length>0)&&(
                   <div className="chat-sources-row">
-                    <span className="chat-sources-label">Nguồn:</span>
-                    {sources.map(s=>(
-                      <NavLink key={s} to="/invoices" className="chat-source-tag" title="Xem hóa đơn">
+                    <span className="chat-sources-label">
+                      {internalSources.length>0&&webSources.length>0
+                        ?'Nguồn tham khảo:'
+                        :internalSources.length>0
+                        ?'Nguồn nội bộ (Hóa đơn):'
+                        :'Nguồn kiểm chứng (Web):'}
+                    </span>
+                    {internalSources.map(s=>(
+                      <NavLink key={s} to="/invoices" className="chat-source-tag" title="Xem hóa đơn nội bộ">
                         <FileText size={12}/> {s} <ExternalLink size={10}/>
                       </NavLink>
+                    ))}
+                    {webSources.map((ws,wIdx)=>(
+                      <a
+                        key={wIdx}
+                        href={ws.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chat-source-tag chat-source-tag-web"
+                        title={ws.title||ws.url}
+                      >
+                        <Globe size={12}/> {ws.title?(ws.title.length>32?ws.title.slice(0,32)+'…':ws.title):'Nguồn web'} <ExternalLink size={10}/>
+                      </a>
                     ))}
                   </div>
                 )}
@@ -1202,20 +1270,6 @@ function ChatPage({user}){
             )
           )}
 
-          {!sending&&messages.length>0&&messages[messages.length-1].role==='assistant'&&(
-            <div className="chat-suggestions-row">
-              {SUGGESTED_CHIPS.map((chip,idx)=>(
-                <button
-                  key={idx}
-                  type="button"
-                  className="chat-suggestion-chip"
-                  onClick={()=>submitWithText(chip)}
-                >
-                  {chip} <ArrowRight size={12}/>
-                </button>
-              ))}
-            </div>
-          )}
 
           <div ref={messagesEnd}/>
         </div>
