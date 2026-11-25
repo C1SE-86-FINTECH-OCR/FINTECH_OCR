@@ -879,7 +879,11 @@ def ensure_schedule_available(db,assigned_to,starts_at,ends_at,exclude_id=None):
     conflict=db.scalar(q.limit(1))
     if conflict:fail('Nhân viên đã có lịch công tác trùng thời gian. Hãy chọn khung giờ khác.',409)
 @app.post('/api/v1/schedules',status_code=201)
-def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(current_user)):
+    if user.role == 'accountant':
+        fail('Kế toán chỉ có quyền xem lịch công tác, không có quyền tạo hoặc thay đổi lịch', 403)
+    if user.role != 'admin':
+        fail('Chỉ có quản trị viên mới có quyền tạo và phân lịch công tác', 403)
     employee=db.get(User,data.assigned_to)
     if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
     starts_at=schedule_datetime(data.starts_at);ends_at=schedule_datetime(data.ends_at)
@@ -893,12 +897,23 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
     values['created_at']=datetime.now(timezone.utc)
     values['updated_at']=values['created_at']
     s=Schedule(**values,created_by=user.id)
-    db.add(s);db.flush();notify(db,employee.id,'Lịch công tác mới',f'{s.title} – {s.destination}',schedule_id=s.id,event_type='schedule_assigned')
+    db.add(s);db.flush()
+    if employee.id != user.id:
+        notify(db,employee.id,'Lịch công tác mới',f'{s.title} – {s.destination}',schedule_id=s.id,event_type='schedule_assigned')
     audit(db,user.id,'schedule.created','schedule',s.id);db.commit();return schedule_ser(s,db)
 @app.patch('/api/v1/schedules/{schedule_id}')
-def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(current_user)):
     s=db.get(Schedule,schedule_id)
     if not s:fail('Không tìm thấy lịch',404)
+    if user.role == 'accountant':
+        fail('Kế toán chỉ có quyền xem lịch công tác, không có quyền thay đổi lịch', 403)
+    if user.role == 'employee':
+        if s.assigned_to != user.id:
+            fail('Nhân viên chỉ có thể tự điều chỉnh lịch công tác của chính mình', 403)
+        if body.assigned_to is not None and body.assigned_to != user.id:
+            fail('Bạn không thể chuyển giao lịch công tác cho người khác', 403)
+    elif user.role != 'admin':
+        fail('Không có quyền điều chỉnh lịch công tác', 403)
     changes=body.model_dump(exclude_unset=True)
     if not changes:fail('Không có thông tin nào để cập nhật')
     if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)
@@ -928,13 +943,14 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
     if body.status is not None:s.status=body.status
     s.completed_at=datetime.now(timezone.utc) if s.status=='completed' and previous_status!='completed' else s.completed_at if s.status=='completed' else None
     now=datetime.now(timezone.utc);_phase2_write_optional(db,'schedules',s.id,{'start_date':starts_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'end_date':ends_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'updated_at':now})
-    if old_assigned!=assigned_to:
+    if old_assigned!=assigned_to and old_assigned!=user.id:
         notify(db,old_assigned,'Lịch công tác đã thay đổi',f'Lịch “{s.title}” đã được phân công cho nhân viên khác.',schedule_id=s.id,event_type='schedule_changed')
     if details_changed or status_changed:
         if s.status=='cancelled':title='Lịch công tác đã hủy';message=f'Lịch “{s.title}” đã bị hủy.';event='schedule_cancelled'
         elif s.status=='completed' and previous_status!='completed':title='Chuyến công tác đã hoàn thành';message=f'Chuyến “{s.title}” đã được xác nhận hoàn thành.';event='schedule_completed'
         else:title='Lịch công tác đã thay đổi';message=f'Lịch “{s.title}” đã được cập nhật.';event='schedule_changed'
-        notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
+        if assigned_to!=user.id:
+            notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
     audit(db,user.id,'schedule.updated','schedule',s.id);db.commit();return schedule_ser(s,db)
 @app.get('/api/v1/ranking')
 def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Session=Depends(db_session),user=Depends(current_user)):
