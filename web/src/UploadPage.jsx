@@ -130,7 +130,7 @@ function MyInvoices({ invoices, busy, error, reload, onSubmit, submittingId, sub
   const counts = useMemo(() => invoiceStatusCounts(invoices), [invoices]);
   const rows = useMemo(() => invoicesForApprovalStatus(invoices, activeTab), [invoices, activeTab]);
   const tabs = [
-    ['all', 'Tất cả'], ['draft', 'Nháp'], ['pending', 'Chờ xử lý'], ['approved', 'Đã phê duyệt'], ['rejected', 'Đã từ chối'],
+    ['all', 'Tất cả'], ['pending', 'Chờ xử lý'], ['approved', 'Đã phê duyệt'], ['rejected', 'Đã từ chối'],
   ];
   return <section className="panel upload-invoices-panel">
     <div className="upload-section-heading">

@@ -96,3 +96,27 @@ def test_all_profile_report_and_schedule_migrations_are_noop_on_new_database():
         assert upgrade_schedule_notes(connection) is False
         assert upgrade_schedule_compat(connection) == []
     engine.dispose()
+
+
+def test_existing_upgrade_is_repeatable_on_current_schema():
+    from migrations.upgrade_existing import upgrade
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        first = upgrade(connection)
+        second = upgrade(connection)
+        assert first == second
+        assert first["profile"] == []
+        assert first["schedule_compat"] == []
+    engine.dispose()
+
+
+def test_existing_upgrade_rejects_missing_base_schema():
+    import pytest
+    from migrations.upgrade_existing import upgrade
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="missing tables"):
+            upgrade(connection)
+        assert inspect(connection).get_table_names() == []
+    engine.dispose()
