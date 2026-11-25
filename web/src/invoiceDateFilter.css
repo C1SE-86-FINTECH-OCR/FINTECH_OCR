@@ -1,0 +1,18 @@
+.invoice-date-filter{margin:0 0 22px;padding:16px 18px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;color:#334155}
+.idf-heading{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.idf-label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:#475569}
+.idf-modes{display:flex;gap:3px;padding:3px;border:1px solid #e2e8f0;background:#fff;border-radius:9px}
+.idf-modes button{border:0;background:transparent;border-radius:6px;padding:7px 16px;color:#64748b;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.idf-modes button.is-selected{background:#18181b;color:#fff;font-weight:600}
+.idf-modes button:hover:not(.is-selected){background:#f1f5f9;color:#18181b}
+.idf-clear,.idf-current{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:0;background:transparent;font:inherit;font-size:12px;font-weight:600;color:#64748b;cursor:pointer;padding:8px}
+.idf-clear{margin-left:auto}.idf-clear:hover,.idf-current:hover{color:#18181b;text-decoration:underline}
+.idf-controls{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:16px}
+.idf-field{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;color:#64748b}
+.idf-field input,.idf-field select{height:38px;min-width:112px;margin:0;padding:7px 12px;border:1px solid #d8dee7;border-radius:7px;background:#fff;color:#1e293b;font:inherit;font-size:13px;font-weight:500;width:auto}
+.idf-arrow{display:inline-flex;align-items:center;justify-content:center;width:36px;height:38px;padding:0;border:1px solid #d8dee7;border-radius:7px;background:#fff;color:#475569;cursor:pointer}
+.idf-arrow:hover{background:#f1f5f9}.idf-arrow:disabled{opacity:.4;cursor:default}.idf-current{height:38px}
+.idf-summary{display:flex;align-items:center;gap:7px;margin:12px 0 0;font-size:12px;color:#64748b;line-height:1.5}
+.idf-dot{width:6px;height:6px;border-radius:50%;background:#64748b;flex-shrink:0}
+.invoice-date-filter button:focus-visible,.idf-field input:focus-visible,.idf-field select:focus-visible{outline:2px solid #64748b;outline-offset:3px}
+@media(max-width:600px){.invoice-date-filter{padding:14px}.idf-heading{gap:12px}.idf-modes{order:3;width:100%}.idf-modes button{flex:1;padding:7px 8px}.idf-controls{gap:8px}.idf-field select,.idf-field input{min-width:85px}.idf-current{padding:6px}}
