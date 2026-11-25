@@ -67,6 +67,16 @@ class Invoice(Base):
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
     updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
     source_file:Mapped[InvoiceFile]=relationship()
+class InvoiceMessage(Base):
+    __tablename__ = 'invoice_messages'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey('invoices.id'), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    recipient_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class InvoiceItem(Base):
     __tablename__='invoice_items'
     id:Mapped[int]=mapped_column(primary_key=True)
@@ -199,3 +209,12 @@ class InvoiceLookup(Base):
     result:Mapped[str]=mapped_column(String(20))
     note:Mapped[str|None]=mapped_column(Text)
     checked_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
+
+
+class DirectMessage(Base):
+    __tablename__ = 'direct_messages'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -1,3 +1,5 @@
+import InvoiceDateFilter from './InvoiceDateFilter.jsx';
+import {invoiceDateRange} from './invoiceDateFilter.js';
 import React,{createContext,useContext,useRef,useState,useEffect,useCallback} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
 import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,Pencil,UserRoundX,UserRoundCheck,Trash2} from 'lucide-react';
@@ -7,16 +9,47 @@ import QuickInvoiceSearch from './QuickInvoiceSearch';
 import WorkspaceSearchPage from './WorkspaceSearchPage';
 import EmployeeProfilePage from './EmployeeProfilePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
+import './invoiceMessages.css';
 import UploadPage from './UploadPage';
 import EmployeeSchedulePage from './SchedulePage';
 import { getQuickDateRange } from './reportDateRanges';
 import './profile.css';
 import { formatNotificationTimestamp, markAllNotificationsReadAfterSuccess, markNotificationReadAfterSuccess, notificationTypeLabel, openNotificationAfterAccessCheck, unreadNotificationCount } from './notificationState';
 
-function useLoad(path){
+function useLoad(path,{allPages=false}={}){
  const [data,setData]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[version,setVersion]=useState(0);
  const reload=useCallback(()=>setVersion(v=>v+1),[]);
- useEffect(()=>{let current=true;setBusy(true);setError('');api(path).then(value=>{if(current)setData(value)}).catch(e=>{if(current)setError(e.message)}).finally(()=>{if(current)setBusy(false)});return ()=>{current=false}},[path,version]);
+ useEffect(()=>{
+   let current=true;
+   async function load(){
+     setBusy(true);
+     setError('');
+     try{
+       if(!allPages){
+         const value=await api(path);
+         if(current)setData(value);
+         return;
+       }
+       const items=[];
+       const limit=250;
+       const separator=path.includes('?')?'&':'?';
+       while(current){
+         const page=await api(path+separator+'limit='+limit+'&offset='+items.length);
+         items.push(...page);
+         if(page.length<limit){
+           if(current)setData(items);
+           return;
+         }
+       }
+     }catch(e){
+       if(current)setError(e.message);
+     }finally{
+       if(current)setBusy(false);
+     }
+   }
+   load();
+   return ()=>{current=false};
+ },[path,version,allPages]);
  return {data,busy,error,reload,setData,setError};
 }
 const NotificationContext=createContext(null);
@@ -30,8 +63,8 @@ function Status({value}){return <Pill type={stateType(value)}>{approvalName(valu
 function Login({onLogin}){const[email,setEmail]=useState('employee@fintech.local'),[password,setPassword]=useState('Password@123'),[error,setError]=useState(''),[loading,setLoading]=useState(false);
 async function submit(e){e.preventDefault();setLoading(true);setError('');try{let res=await api('/auth/login',{method:'POST',body:{email,password}});authStore.set(res.access_token);onLogin(res.user)}catch(e){setError(e.message)}finally{setLoading(false)}}
 return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><span className="brand-symbol">◈</span><span>FINTECH<strong>OCR / KHÔNG GIAN LÀM VIỆC</strong></span></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1>Từ hóa đơn giấy<br/>đến<em>dữ liệu chuẩn xác.</em></h1><p>Số hóa. Kiểm tra. Phê duyệt.<br/>Mọi công cụ cần thiết cho nhóm, trong một không gian làm việc.</p></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle">◈</div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack"><label>Địa chỉ email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form><div className="demo-account"><strong>TÀI KHOẢN DÙNG THỬ</strong>{['employee','accountant','admin'].map(role=><button key={role} onClick={()=>{setEmail(role+'@fintech.local');setPassword('Password@123')}}>{roleName(role)}<span>Dùng tài khoản này ↗</span></button>)}<small>Mật khẩu: Password@123 · Chỉ dùng để phát triển</small></div></div></div></div>}
-const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
-function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
+function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
@@ -377,7 +410,16 @@ function HomePage({ user }) {
     </>}
   </>;
 }
-function InvoicesPage(){const[params,setParams]=useSearchParams();const search=params.get('search')||'';const setSearch=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('search',value);else next.delete('search');return next},{replace:true});const status=params.get('status')||'';const setStatus=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('status',value);else next.delete('status');return next});const {data,busy,reload,error}=useLoad('/invoices?'+new URLSearchParams({...search?{search:search.trim()}:{},...status?{approval_status:status}:{}}));const n=useNavigate();let rows=(data||[]).filter(i=>(!status||i.approval_status===status));return <><Title title="Hóa đơn" description="Tìm kiếm, lọc và xem dữ liệu hóa đơn."/><div className="panel"><div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['draft','pending','approved','rejected'].map(s=><option key={s} value={s}>{approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={reload}><RefreshCw size={16}/></button></div>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th><th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td><td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td><Status value={i.approval_status}/></td><td><Status value={i.lookup_status}/></td><td><button className="btn btn-small btn-muted" onClick={()=>n('/invoices/'+i.id)}>Chi tiết<ArrowRight size={14}/></button></td></tr>)}</tbody></table>{!rows.length&&<Empty label="Không có hóa đơn phù hợp"/>}</div>}</div></>}
+function InvoicesPage({user}){const showUploader=['accountant','admin'].includes(user.role);const[params,setParams]=useSearchParams();const search=params.get('search')||'';const setSearch=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('search',value);else next.delete('search');return next},{replace:true});const status=params.get('status')||'';const setStatus=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('status',value);else next.delete('status');return next});const {data,busy,reload,error}=useLoad('/invoices?'+new URLSearchParams({...invoiceDateRange(['month','year','quarter'].includes(params.get('period'))?params.get('period'):'',params.get('date_value'),params.get('quarter')||'1'),...search?{search:search.trim()}:{},...status?{approval_status:status}:{}}));const n=useNavigate();let rows=(data||[]).filter(i=>(!status||i.approval_status===status));return <><Title title="Hóa đơn" description="Tìm kiếm, lọc và xem dữ liệu hóa đơn."/><div className="panel"><div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['draft','pending','approved','rejected'].map(s=><option key={s} value={s}>{approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={reload}><RefreshCw size={16}/></button></div><InvoiceDateFilter params={params} setParams={setParams}/>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th>{showUploader&&<th>Người gửi hóa đơn</th>}<th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td>{showUploader&&<td>{i.uploaded_by_name||'Không xác định'}</td>}<td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td><Status value={i.approval_status}/></td><td><Status value={i.lookup_status}/></td><td><div className="invoice-message-actions">
+  {showUploader && i.uploaded_by_name && i.uploaded_by!==user.id && (
+    <button className="btn btn-small btn-outline" aria-label={'Nhắn tin với '+i.uploaded_by_name} title={'Nhắn tin với '+i.uploaded_by_name} onClick={()=>n('/messages?recipient='+i.uploaded_by)}>
+      <MessageSquare size={17}/>
+    </button>
+  )}
+  <button className="btn btn-small btn-muted" onClick={()=>n('/invoices/'+i.id)}>
+    Chi tiết<ArrowRight size={14}/>
+  </button>
+</div></td></tr>)}</tbody></table>{!rows.length&&<Empty label="Không có hóa đơn phù hợp"/>}</div>}</div></>}
 const RISK_LABELS={
   'DUPLICATE-FILE':'Trùng nội dung file',
   'DUPLICATE-INVOICE':'Trùng thông tin hóa đơn',
@@ -446,8 +488,148 @@ function RiskAssessmentPanel({invoiceId}){
   </section>
 }
 
-function DetailPage({user}){const {id}=useParams();const {data,reload,busy,error}=useLoad('/invoices/'+id);const[riskVersion,setRiskVersion]=useState(0);return <><InvoiceDetailPage user={user} id={id} data={data} busy={busy} error={error} reload={reload} onChanged={()=>setRiskVersion(v=>v+1)}/>{data&&!busy&&!error&&<RiskAssessmentPanel key={id+'-'+riskVersion} invoiceId={id}/>}</>}
-function ApprovalsPage(){const{data,busy,error}=useLoad('/invoices');const[filter,setFilter]=useState('pending');const n=useNavigate();const rows=(data||[]).filter(x=>!filter||x.approval_status===filter);return <><Title title="Hàng đợi phê duyệt" description="Xem chi tiết hóa đơn, ghi nhận kết quả tra cứu thuế và xử lý phê duyệt."/><section className="panel"><div className="tabs">{[['pending',"Chờ xử lý"],['approved',"Đã phê duyệt"],['rejected',"Đã từ chối"],['',"Tất cả"]].map(([v,name])=><button className={filter===v?'selected':''} key={name} onClick={()=>setFilter(v)}>{name} <b>{(data||[]).filter(i=>!v||i.approval_status===v).length}</b></button>)}</div>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="approval-cards">{rows.map(i=><div className="approval-card" key={i.id}><div><small>{approvalName(i.document_type)}· HÓA ĐƠN #{i.id}</small><h3>{i.seller_name||i.filename}</h3><p>{i.invoice_number||"Hóa đơn mới"} · {datefmt(i.invoice_date)}</p></div><div className="approval-right"><strong>{money(i.total_amount)}</strong><Status value={i.approval_status}/><button className="btn btn-primary btn-small" onClick={()=>n('/invoices/'+i.id)}>Xem chi tiết<ArrowRight size={15}/></button></div></div>)}{!rows.length&&<Empty label="Hàng đợi đang trống"/>}</div>}</section></>}
+function DetailPage({user}){
+  const {id}=useParams();
+  const {data,reload,busy,error}=useLoad('/invoices/'+id);
+  const [riskVersion,setRiskVersion]=useState(0);
+  const navigate=useNavigate();
+  const canDiscuss=data && !busy && !error && data.approval_status!=='draft' &&
+    (user.role==='accountant' || data.uploaded_by===user.id);
+  return <>
+    <InvoiceDetailPage user={user} id={id} data={data} busy={busy} error={error} reload={reload} onChanged={()=>setRiskVersion(v=>v+1)}/>
+    {canDiscuss&&<button className="btn btn-outline" onClick={()=>navigate('/invoices/'+id+'/messages')}>
+      <MessageSquare size={16}/> Tin nhắn về hóa đơn
+    </button>}
+    {data&&!busy&&!error&&<RiskAssessmentPanel key={id+'-'+riskVersion} invoiceId={id}/>}
+  </>;
+}
+
+function ApprovalsPage({user}){
+  const {data,busy,error}=useLoad('/invoices',{allPages:true});
+  const [filter,setFilter]=useState('pending');
+  const navigate=useNavigate();
+  const invoices=data||[];
+  const rows=invoices.filter(invoice=>!filter||invoice.approval_status===filter);
+  const tabs=[['pending','Chờ xử lý'],['approved','Đã phê duyệt'],['rejected','Đã từ chối'],['','Tất cả']];
+  return <>
+    <Title title="Hàng đợi phê duyệt" description="Xem chi tiết hóa đơn, ghi nhận kết quả tra cứu thuế và xử lý phê duyệt."/>
+    <section className="panel">
+      <div className="tabs">{tabs.map(([value,name])=><button className={filter===value?'selected':''} key={name} onClick={()=>setFilter(value)}>
+        {name} <b>{invoices.filter(i=>!value||i.approval_status===value).length}</b>
+      </button>)}</div>
+      {busy?<Loading/>:error?<p className="error">{error}</p>:<div className="approval-cards">
+        {rows.map(invoice=><div className="approval-card" key={invoice.id}>
+          <div>
+            <small>{documentTypeName(invoice.document_type)} · HÓA ĐƠN #{invoice.id}</small>
+            <h3>{invoice.seller_name||invoice.filename}</h3>
+            <p>{invoice.invoice_number||'Hóa đơn mới'} · {datefmt(invoice.invoice_date)}</p>
+            <p>Người đăng: <strong>{invoice.uploaded_by_name||'Không xác định'}</strong></p>
+          </div>
+          <div className="approval-right">
+            <strong>{money(invoice.total_amount)}</strong>
+            <Status value={invoice.approval_status}/>
+            <div className="invoice-message-actions">
+              {user.role==='accountant'&&invoice.uploaded_by_name&&
+                <button className="btn btn-outline btn-small" aria-label={'Nhắn tin với '+invoice.uploaded_by_name} title={'Nhắn tin với '+invoice.uploaded_by_name} onClick={()=>navigate('/messages?recipient='+invoice.uploaded_by)}>
+                  <MessageSquare size={17}/>
+                </button>}
+              <button className="btn btn-primary btn-small" onClick={()=>navigate('/invoices/'+invoice.id)}>
+                Xem chi tiết<ArrowRight size={15}/>
+              </button>
+            </div>
+          </div>
+        </div>)}
+        {!rows.length&&<Empty label="Hàng đợi đang trống"/>}
+      </div>}
+    </section>
+  </>;
+}
+
+function InvoiceMessagesRoute({user}){
+  const {id}=useParams();
+  return <InvoiceMessagesPage key={id} id={id} user={user}/>;
+}
+
+function InvoiceMessagesPage({id,user}){
+  const direct=!id;
+  const [params]=useSearchParams();
+  const path=direct?'/messages':'/invoices/'+id+'/messages';
+  const {data,busy,error,reload}=useLoad(path);
+  const navigate=useNavigate();
+  const [peerId,setPeerId]=useState(params.get('recipient')||'');
+  const [body,setBody]=useState('');
+  const [sending,setSending]=useState(false);
+  const [sendError,setSendError]=useState('');
+  const messageList=useRef(null);
+  const latest=data?.messages.at(-1);
+  const latestPeerId=latest?.sender_id===user.id?latest.recipient_id:latest?.sender_id;
+  const peer=data?.peers.find(item=>String(item.id)===peerId)||
+    data?.peers.find(item=>item.id===latestPeerId)||data?.peers[0];
+  const messages=data?.messages.filter(message=>message.sender_id===peer?.id||message.recipient_id===peer?.id)||[];
+  const lastMessageId=messages.at(-1)?.id;
+  useEffect(()=>{
+    const list=messageList.current;
+    if(list) list.scrollTop=list.scrollHeight;
+  },[peer?.id,lastMessageId,error]);
+
+  async function send(event){
+    event.preventDefault();
+    if(!peer?.active||!body.trim()||sending) return;
+    setSending(true);
+    setSendError('');
+    try{
+      await api(path,{method:'POST',body:{body:body.trim(),recipient_id:peer.id}});
+      setBody('');
+      reload();
+    }catch(e){
+      setSendError(e.message);
+    }finally{
+      setSending(false);
+    }
+  }
+
+  return <>
+    <Title title={direct?'Tin nhắn nhân viên':'Tin nhắn · Hóa đơn #'+id} action={direct?null:
+      <button className="btn btn-outline" onClick={()=>navigate('/invoices/'+id)}><ChevronLeft size={16}/> Về hóa đơn</button>
+    }/>
+    <section className="panel invoice-message-panel" aria-label="Cuộc trò chuyện về hóa đơn">
+      <header className="invoice-message-header">
+        <div className="invoice-message-person">
+          <span className="invoice-message-avatar" aria-hidden="true">
+            {peer?peer.name.trim().split(/\s+/).slice(-2).map(word=>word[0]).join('').toUpperCase():<MessageSquare size={21}/>}
+          </span>
+          <div>
+            <small>{peer?(peer.role?roleName(peer.role):'Người nhận'):'Cuộc trò chuyện'}</small>
+            {data?.peers.length>1?<select aria-label="Chọn người trao đổi" value={peer?.id} disabled={sending} onChange={event=>{
+              setPeerId(event.target.value);setBody('');setSendError('');
+            }}>{data.peers.map(item=><option key={item.id} value={item.id}>{item.name}{item.role?' · '+roleName(item.role):''}</option>)}</select>:peer?<strong>{peer.name}</strong>:null}
+          </div>
+        </div>
+        <button className="btn btn-muted btn-small" onClick={reload} disabled={busy}><RefreshCw size={15}/> Làm mới</button>
+      </header>
+      {error?<div className="invoice-message-state"><p role="alert" className="error">{error}</p></div>:busy&&!data?<Loading/>:<>
+        {messages.length?<ol ref={messageList} className="invoice-message-list" aria-label="Tin nhắn" tabIndex={0}>
+          {messages.map(message=><li key={message.id} className={message.sender_id===user.id?'own-message':''}>
+            <small>{message.sender_id===user.id?'Bạn':peer.name} · {formatNotificationTimestamp(message.created_at)}</small>
+            <p className="invoice-message-bubble">{message.body}</p>
+          </li>)}
+        </ol>:<div className="invoice-message-empty">
+          <span aria-hidden="true"><MessageSquare size={24}/></span>
+          <strong>Chưa có tin nhắn</strong>
+          {peer?.active&&<p>Gửi tin nhắn đầu tiên để bắt đầu trao đổi.</p>}
+        </div>}
+        {peer&&(peer.active?<form onSubmit={send} className="invoice-message-form">
+          <textarea aria-label="Nội dung tin nhắn" placeholder="Nhập nội dung trao đổi…" value={body} onChange={event=>setBody(event.target.value)} rows={3} maxLength={2000} required disabled={sending}/>
+          {sendError&&<p role="alert" className="error">{sendError}</p>}
+          <div className="invoice-message-footer">
+            <small>{body.length}/2000</small>
+            <button className="btn btn-primary" disabled={sending||busy||!body.trim()}><Send size={16}/> {sending?'Đang gửi…':'Gửi tin nhắn'}</button>
+          </div>
+        </form>:<p className="invoice-message-state">Người nhận hiện không thể nhận tin nhắn.</p>)}
+      </>}
+    </section>
+  </>;
+}
 function SchedulePage({user}){return <EmployeeSchedulePage user={user}/>}
 function RankingPage(){const[params,setParams]=useSearchParams();const location=useLocation();const period=['all','month','quarter','year'].includes(params.get('period'))?params.get('period'):'all';const setPeriod=value=>setParams({period:value});const{data,busy,error}=useLoad('/ranking?period='+period);useEffect(()=>{if(!busy&&location.hash){document.getElementById(location.hash.slice(1))?.scrollIntoView({block:'center',behavior:'smooth'})}},[busy,data,location.hash]);return <><Title title="Xếp hạng công tác" description="Xếp hạng theo số chuyến công tác đã hoàn thành; không tính chuyến dự kiến hoặc đã hủy."/><section className="panel"><div className="filters"><h3>Bảng xếp hạng nhân viên</h3><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">Toàn thời gian</option><option value="month">Tháng này</option><option value="quarter">Quý này</option><option value="year">Năm nay</option></select></div>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="ranking">{(data||[]).map((r,i)=><div className="rankrow" id={'ranking-'+r.user_id} key={r.user_id}><span className="rank">#{i+1}</span><span className="avatar">{r.full_name.slice(-2).toUpperCase()}</span><strong>{r.full_name}</strong><span className="rank-score">{r.completed} chuyến hoàn thành</span></div>)}{!data?.length&&<Empty label="Chưa có chuyến công tác hoàn thành trong kỳ"/>}</div>}</section></>}
 function ChatPage(){const[question,setQuestion]=useState(''),[messages,setMessages]=useState([{role:'assistant',content:'Xin chào! Tôi đang dùng chế độ truy vấn dữ liệu demo, chưa kết nối LLM. Bạn có thể hỏi: Tổng tiền hóa đơn là bao nhiêu?'}]),[sending,setSending]=useState(false);async function submit(e){e.preventDefault();if(!question.trim())return;const q=question;setQuestion('');setMessages(x=>[...x,{role:'user',content:q}]);setSending(true);try{let r=await api('/chatbot/ask',{method:'POST',body:{question:q}});setMessages(x=>[...x,{role:'assistant',content:r.answer}])}catch(e){setMessages(x=>[...x,{role:'assistant',content:e.message}])}finally{setSending(false)}}return <><Title title="Trò chuyện với AI" description="Đặt câu hỏi về dữ liệu hóa đơn trong phạm vi quyền truy cập của bạn."/><section className="panel chat-panel"><div className="chat-heading"><span className="chat-bot">◈</span><div><strong>Trợ lý dữ liệu FINTECH</strong><small>Bản thử nghiệm truy vấn dữ liệu theo quyền · chưa tích hợp LLM</small></div></div><div className="chat-messages">{messages.map((m,i)=><div className={'chat-message '+m.role} key={i}>{m.content}</div>)}{sending&&<Loading/>}</div><form className="chat-form" onSubmit={submit}><input placeholder="Hỏi về hóa đơn..." value={question} onChange={e=>setQuestion(e.target.value)}/><button className="btn btn-primary"><Send size={17}/></button></form></section></>}
@@ -499,14 +681,14 @@ function UsersPage(){
      setConfirm(null);if(editing?.id===user.id)setForm(current=>current?{...current,status:deactivate?'disabled':'active'}:current);reload();setMessage(deactivate?'Đã vô hiệu hóa tài khoản':'Đã kích hoạt lại tài khoản');
    }catch(e){setMessage(e.message)}finally{setSaving(false)}
  }
- async function perform(){if(saving||!confirm)return;if(confirm.action==='toggle'){await toggleAccount(confirm.user);return}setSaving(true);try{await api('/users/'+confirm.user.id,confirm.action==='delete'?{method:'DELETE'}:{method:'PATCH',body:{status:confirm.user.status==='active'?'disabled':'active'}});setConfirm(null);reload();setMessage('Đã cập nhật tài khoản')}catch(e){setMessage(e.message)}finally{setSaving(false)}}
+ async function perform(){if(saving||!confirm)return;if(confirm.action==='toggle'){await toggleAccount(confirm.user);return}setSaving(true);try{await api('/users/'+confirm.user.id,confirm.action==='delete'?{method:'DELETE'}:{method:'PATCH',body:{status:confirm.user.status==='active'?'disabled':'active'}});setConfirm(null);reload();setMessage(confirm.action==='delete'?'Đã xóa hoàn toàn tài khoản':'Đã cập nhật tài khoản')}catch(e){setMessage(e.message)}finally{setSaving(false)}}
  const active=(data||[]).filter(u=>u.status==='active').length;
  const permissions={employee:'Tải hóa đơn cá nhân, xem lịch công tác và trò chuyện với AI. Không có quyền phê duyệt hoặc quản lý người dùng.',accountant:'Kiểm tra hóa đơn, phê duyệt chi phí, quản lý lịch công tác và xem báo cáo.',admin:'Quản lý người dùng, phân quyền, hóa đơn và lịch sử kiểm toán.'};
  const actionLabel=confirm?.action==='delete'?'Xóa tài khoản':confirm?.user.status==='active'?'Vô hiệu hóa tài khoản':'Kích hoạt lại tài khoản';
  return <div className="users-page"><Title title="Quản lý người dùng" description="Quản lý quyền truy cập, vai trò và trạng thái tài khoản. Lịch sử tài khoản được lưu giữ."/>
  <div className={'users-layout '+(!form?'form-closed':'')}><div className="users-main"><section className="panel users-table-panel"><div className="panel-heading"><h3>Danh sách người dùng <span className="users-count">{data?.length||0}</span></h3><small>{active} đang hoạt động · {(data?.length||0)-active} đã vô hiệu hóa</small></div><div className="filters users-filters"><label className="searchbox"><Search size={15}/><input aria-label="Tìm người dùng" placeholder="Tìm theo tên hoặc email" value={search} onChange={e=>setSearch(e.target.value)}/></label><select aria-label="Lọc vai trò" value={role} onChange={e=>setRole(e.target.value)}><option value="">Tất cả vai trò</option>{['employee','accountant','admin'].map(r=><option key={r} value={r}>{roleName(r)}</option>)}</select><button className="btn btn-primary" onClick={()=>edit(null)}><Plus size={15}/> Thêm người dùng</button></div>
  {busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll users-scroll" tabIndex={0} role="region" aria-label="Danh sách người dùng"><table><thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th>Thao tác</th></tr></thead><tbody>{rows.map(u=><tr key={u.id} className={confirm?.user.id===u.id?'user-selected':''} onClick={()=>edit(u)}><td><div className="user-identity"><span className={`avatar user-avatar avatar-tone-${u.id%5}`}>{u.full_name.split(/\s+/).filter(Boolean).slice(-2).map(x=>x[0]).join('').toUpperCase()}</span><button className="user-select-button" aria-pressed={confirm?.user.id===u.id} disabled={saving} onClick={e=>{e.stopPropagation();edit(u)}}>{u.full_name}</button></div></td><td>{u.email}</td><td><Pill>{roleName(u.role)}</Pill></td><td><Pill type={u.status==='active'?'green':'gray'}>{u.status==='active'?'Đang hoạt động':'Đã vô hiệu hóa'}</Pill></td><td className="user-last-login">{u.last_login_at?new Date(u.last_login_at).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Chưa đăng nhập'}</td><td><div className="user-actions" onClick={e=>e.stopPropagation()}><button className="iconbtn" title="Sửa người dùng" aria-label={'Sửa '+u.full_name} disabled={saving} onClick={()=>edit(u)}><Pencil size={15}/></button><button className="iconbtn" title={u.status==='active'?'Vô hiệu hóa':'Kích hoạt lại'} aria-label={(u.status==='active'?'Vô hiệu hóa ':'Kích hoạt lại ')+u.full_name} disabled={saving} onClick={()=>edit(u)}>{u.status==='active'?<UserRoundX size={15}/>:<UserRoundCheck size={15}/>}</button><button className="iconbtn danger-action" title="Xóa người dùng" aria-label={'Xóa '+u.full_name} disabled={saving} onClick={()=>setConfirm({user:u,action:'delete'})}><Trash2 size={14}/></button></div></td></tr>)}</tbody></table>{!rows.length&&<Empty label="Không có người dùng phù hợp"/>}</div>}<footer className="users-table-footer"><span>Hiển thị {rows.length} / {data?.length||0} người dùng</span><span><Pencil size={12}/> Sửa <UserRoundX size={13}/> Vô hiệu hóa / Kích hoạt lại</span></footer></section>
- {confirm&&<section className="panel user-confirm" aria-labelledby="confirm-title"><div className="panel-heading"><h3 id="confirm-title"><UserRoundX size={18}/> {actionLabel}?</h3><button className="iconbtn" disabled={saving} aria-label="Hủy thao tác" onClick={()=>setConfirm(null)}><X size={16}/></button></div><strong>{confirm.user.full_name} · {confirm.user.email}</strong><p>{confirm.action==='delete'?'Thao tác xóa không thể hoàn tác. Tài khoản đã có lịch sử liên quan cần được vô hiệu hóa.':confirm.user.status==='active'?'Người dùng sẽ không thể đăng nhập; lịch sử tài khoản vẫn được giữ lại.':'Cho phép người dùng đăng nhập trở lại.'}</p><div className="user-confirm-actions"><button disabled={saving} className="btn btn-muted" onClick={()=>setConfirm(null)}>Hủy</button><button disabled={saving} className="btn btn-primary" onClick={perform}>{saving?'Đang xử lý...':actionLabel}</button></div></section>}
+ {confirm&&<section className="panel user-confirm" aria-labelledby="confirm-title"><div className="panel-heading"><h3 id="confirm-title"><UserRoundX size={18}/> {actionLabel}?</h3><button className="iconbtn" disabled={saving} aria-label="Hủy thao tác" onClick={()=>setConfirm(null)}><X size={16}/></button></div><strong>{confirm.user.full_name} · {confirm.user.email}</strong><p>{confirm.action==='delete'?'Chỉ xóa hoàn toàn tài khoản chưa tải hóa đơn và không có lịch sử xử lý hóa đơn. Tin nhắn, thông báo, báo cáo cá nhân và lịch được giao sẽ bị xóa. Thao tác không thể hoàn tác.':confirm.user.status==='active'?'Người dùng sẽ không thể đăng nhập; lịch sử tài khoản vẫn được giữ lại.':'Cho phép người dùng đăng nhập trở lại.'}</p><div className="user-confirm-actions"><button disabled={saving} className="btn btn-muted" onClick={()=>setConfirm(null)}>Hủy</button><button disabled={saving} className="btn btn-primary" onClick={perform}>{saving?'Đang xử lý...':actionLabel}</button></div></section>}
  </div>
  {form&&<aside className="panel user-editor" aria-labelledby="user-form-title"><div className="panel-heading"><h3 id="user-form-title">Thêm / Sửa người dùng</h3><button className="iconbtn" disabled={saving} aria-label="Đóng biểu mẫu" onClick={()=>setForm(null)}><X size={16}/></button></div><p>{editing?'Cập nhật thông tin thành viên.':'Tạo tài khoản thành viên mới.'}</p><form className="stack" onSubmit={save}><label>Họ và tên<input required minLength={2} maxLength={150} value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label><label>Email<input type="email" required value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label>{!editing&&<label>Mật khẩu tạm thời<input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/><small>Tối thiểu 8 ký tự.</small></label>}<label>Vai trò<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{['employee','accountant','admin'].map(r=><option key={r} value={r}>{roleName(r)}</option>)}</select></label><div className="user-permissions"><strong><ShieldCheck size={13}/> {roleName(form.role)} — quyền truy cập</strong><p>{permissions[form.role]}</p></div><label className="user-active-toggle"><span>Đang hoạt động<small>Cho phép người dùng đăng nhập</small></span><input type="checkbox" role="switch" aria-label="Trạng thái kích hoạt tài khoản" disabled={saving} checked={form.status==='active'} onChange={e=>setForm({...form,status:e.target.checked?'active':'disabled'})}/></label><div className="user-editor-actions"><button type="button" disabled={saving} className="btn btn-muted" onClick={()=>setForm(null)}>Hủy</button><button disabled={saving} className="btn btn-primary">{saving?'Đang lưu...':editing?'Lưu thay đổi':'Tạo người dùng'}</button></div></form></aside>}
  </div>
@@ -749,10 +931,12 @@ export default function App(){
       <Route path="/people/:id" element={<EmployeeProfilePage/>}/>
       <Route path="/search" element={<WorkspaceSearchPage/>}/>
       <Route path="/" element={<HomePage user={user}/>}/>
-      <Route path="/invoices" element={<InvoicesPage/>}/>
+      <Route path="/invoices" element={<InvoicesPage user={user}/>}/>
       <Route path="/invoices/:id" element={<DetailPage user={user}/>}/>
+      <Route path="/messages" element={<InvoiceMessagesPage key="direct" user={user}/>}/>
+      <Route path="/invoices/:id/messages" element={<InvoiceMessagesRoute user={user}/>}/>
       <Route path="/upload" element={user.role==='employee'?<UploadPage/>:<Navigate to="/invoices"/>}/>
-      <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage/>:<Navigate to="/"/>}/>
+      <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage user={user}/>:<Navigate to="/"/>}/>
       <Route path="/schedule" element={<SchedulePage user={user}/>}/>
       <Route path="/ranking" element={<RankingPage/>}/>
       <Route path="/chat" element={<ChatPage/>}/>

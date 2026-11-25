@@ -20,6 +20,8 @@ export function notificationTypeLabel(type) {
     extraction_finished: 'Đã trích xuất OCR',
     invoice_submitted: 'Đã gửi hóa đơn',
     invoice_decision: 'Kết quả phê duyệt',
+    invoice_message: 'Tin nhắn hóa đơn',
+    direct_message: 'Tin nhắn nhân viên',
     schedule_assigned: 'Được giao lịch công tác',
     legacy: 'Thông báo chung',
   })[type] || type || 'Thông báo chung';
@@ -38,6 +40,10 @@ export function setAllNotificationsRead(items) {
 }
 
 export function notificationTarget(notification) {
+  if (notification?.type === 'direct_message') return {kind: 'message', path: '/messages'};
+  if (notification?.invoice_id != null && notification.type === 'invoice_message') {
+    return { kind: 'invoice', path: `/invoices/${notification.invoice_id}/messages` };
+  }
   if (notification?.invoice_id != null) {
     return { kind: 'invoice', path: `/invoices/${notification.invoice_id}` };
   }

@@ -337,12 +337,38 @@ def delete_user(user_id:int,db:Session=Depends(db_session),user=Depends(require_
     target=db.get(User,user_id)
     if not target:fail('Không tìm thấy người dùng',404)
     if target.id==user.id:fail('Bạn không thể xóa tài khoản đang sử dụng')
-    for table in Base.metadata.sorted_tables:
-        for column in table.columns:
-            if any(fk.target_fullname=='users.id' for fk in column.foreign_keys):
-                if db.scalar(select(func.count()).select_from(table).where(column==user_id)):
-                    fail('Tài khoản có dữ liệu liên quan. Vui lòng vô hiệu hóa thay vì xóa.',409)
+    # Serialize deletion with new uploads referencing this account in PostgreSQL.
+    target=db.scalar(select(User).where(User.id==user_id).with_for_update())
+    if not target:fail('Không tìm thấy người dùng',404)
+    if db.scalar(select(InvoiceFile.id).where(InvoiceFile.uploaded_by==user_id).limit(1)):
+        fail('Tài khoản có dữ liệu hóa đơn quan trọng, không thể xóa. Bạn có thể vô hiệu hóa tài khoản.',409)
+    for model, column in ((Invoice,Invoice.reviewed_by),(InvoiceApproval,InvoiceApproval.action_by),
+                          (InvoiceCorrection,InvoiceCorrection.corrected_by),(InvoiceLookup,InvoiceLookup.checked_by)):
+        if db.scalar(select(model.id).where(column==user_id).limit(1)):
+            fail('Tài khoản có lịch sử xử lý hóa đơn quan trọng, không thể xóa. Bạn có thể vô hiệu hóa tài khoản.',409)
     try:
+        existing_tables=set(sa_inspect(db.connection()).get_table_names())
+        def remove(model, condition):
+            if model.__tablename__ in existing_tables:
+                db.execute(model.__table__.delete().where(condition))
+        # Remove personal data in dependency order; retain other users' schedules
+        # and audit events without retaining a reference to a deleted identity.
+        conversations=select(Conversation.id).where(Conversation.user_id==user_id)
+        chat_ids=select(ChatMessage.id).where(ChatMessage.conversation_id.in_(conversations))
+        remove(ChatMessageSource,ChatMessageSource.message_id.in_(chat_ids))
+        remove(ChatMessage,ChatMessage.conversation_id.in_(conversations))
+        remove(Conversation,Conversation.user_id==user_id)
+        remove(DirectMessage,(DirectMessage.sender_id==user_id)|(DirectMessage.recipient_id==user_id))
+        remove(InvoiceMessage,(InvoiceMessage.sender_id==user_id)|(InvoiceMessage.recipient_id==user_id))
+        remove(Notification,Notification.user_id==user_id)
+        remove(RevokedToken,RevokedToken.user_id==user_id)
+        remove(Report,Report.requested_by==user_id)
+        assigned=select(Schedule.id).where(Schedule.assigned_to==user_id)
+        db.execute(Notification.__table__.update().where(Notification.schedule_id.in_(assigned)).values(schedule_id=None))
+        remove(Schedule,Schedule.assigned_to==user_id)
+        db.execute(Schedule.__table__.update().where(Schedule.created_by==user_id).values(created_by=user.id))
+        db.execute(User.__table__.update().where(User.created_by==user_id).values(created_by=None))
+        db.execute(AuditLog.__table__.update().where(AuditLog.actor_id==user_id).values(actor_id=None))
         audit(db,user.id,'user.deleted','user',target.id)
         db.delete(target)
         db.commit()
@@ -388,7 +414,122 @@ def invoices(search:str='',approval_status:str='',validation_status:str='',docum
     if document_type:query=query.where(Invoice.document_type==document_type)
     if invoice_date_from:query=query.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:query=query.where(Invoice.invoice_date<=invoice_date_to)
-    return [inv_ser(i,db) for i in db.scalars(query.order_by(*([search_rank] if search_rank is not None else []),desc(Invoice.created_at),desc(Invoice.id)).offset(offset).limit(limit)).all()]
+    rows = db.execute(
+        query.outerjoin(User, User.id == InvoiceFile.uploaded_by)
+        .add_columns(User.full_name)
+        .order_by(*([search_rank] if search_rank is not None else []), desc(Invoice.created_at), desc(Invoice.id))
+        .offset(offset).limit(limit)
+    ).all()
+    return [dict(inv_ser(invoice, db), uploaded_by_name=name) for invoice, name in rows]
+
+
+class InvoiceMessageInput(BaseModel):
+    body: str = Field(max_length=2000)
+    recipient_id: int | None = None
+
+
+@app.get('/api/v1/messages')
+def direct_messages(db: Session = Depends(db_session), user=Depends(current_user)):
+    if user.role not in ('admin', 'accountant', 'employee'):
+        fail('Bạn không có quyền truy cập tin nhắn', 403)
+    peer_roles = {'admin': ('admin', 'accountant', 'employee'), 'accountant': ('admin', 'employee'), 'employee': ('admin', 'accountant')}[user.role]
+    peers = db.scalars(select(User).where(User.role.in_(peer_roles), User.id != user.id).order_by(User.full_name, User.id)).all()
+    messages = db.scalars(select(DirectMessage).where(
+        (DirectMessage.sender_id == user.id) | (DirectMessage.recipient_id == user.id)
+    ).order_by(DirectMessage.id)).all()
+    return {
+        'peers': [{'id': p.id, 'name': p.full_name, 'role': p.role, 'active': p.status == 'active'} for p in peers],
+        'messages': [{'id': m.id, 'sender_id': m.sender_id, 'recipient_id': m.recipient_id,
+                      'body': m.body, 'created_at': m.created_at.isoformat()} for m in messages],
+    }
+
+
+@app.post('/api/v1/messages', status_code=201)
+def send_direct_message(body: InvoiceMessageInput, db: Session = Depends(db_session), user=Depends(current_user)):
+    if user.role not in ('admin', 'accountant', 'employee'):
+        fail('Bạn không có quyền gửi tin nhắn', 403)
+    recipient = db.get(User, body.recipient_id) if body.recipient_id else None
+    peer_roles = {'admin': ('admin', 'accountant', 'employee'), 'accountant': ('admin', 'employee'), 'employee': ('admin', 'accountant')}[user.role]
+    if not recipient or recipient.id == user.id or recipient.role not in peer_roles or recipient.status != 'active':
+        fail('Người nhận hiện không thể nhận tin nhắn', 409)
+    message = body.body.strip()
+    if not message:
+        fail('Vui lòng nhập nội dung tin nhắn', 422)
+    db.add(DirectMessage(sender_id=user.id, recipient_id=recipient.id, body=message))
+    notify(db, recipient.id, 'Tin nhắn mới', f'{user.full_name} đã gửi tin nhắn cho bạn.', event_type='direct_message')
+    db.commit()
+    return {'sent': True}
+
+
+INVOICE_MESSAGE_TITLE = 'Tin nhắn về hóa đơn'
+
+
+def message_invoice(db, user, invoice_id):
+    invoice = invoice_allowed(db, user, invoice_id)
+    if invoice.approval_status == 'draft' or (
+        user.role != 'accountant' and invoice.source_file.uploaded_by != user.id
+    ):
+        fail('Bạn không có quyền trao đổi về hóa đơn này', 403)
+    return invoice
+
+
+@app.get('/api/v1/invoices/{invoice_id}/messages')
+def invoice_messages(invoice_id: int, db: Session = Depends(db_session), user=Depends(current_user)):
+    invoice = message_invoice(db, user, invoice_id)
+    messages = db.scalars(
+        select(InvoiceMessage).where(
+            InvoiceMessage.invoice_id == invoice.id,
+            (InvoiceMessage.sender_id == user.id) | (InvoiceMessage.recipient_id == user.id),
+        ).order_by(InvoiceMessage.id)
+    ).all()
+    peer_ids = {m.recipient_id if m.sender_id == user.id else m.sender_id for m in messages}
+    if user.role == 'accountant' and invoice.source_file.uploaded_by != user.id:
+        peer_ids.add(invoice.source_file.uploaded_by)
+    peers = db.execute(
+        select(User.id, User.full_name, User.status).where(User.id.in_(peer_ids)).order_by(User.full_name, User.id)
+    ).all() if peer_ids else []
+    return {
+        'peers': [{'id': id, 'name': name, 'active': status == 'active'} for id, name, status in peers],
+        'messages': [
+            {'id': m.id, 'sender_id': m.sender_id, 'recipient_id': m.recipient_id,
+             'body': m.body, 'created_at': m.created_at.isoformat()}
+            for m in messages
+        ],
+    }
+
+
+@app.post('/api/v1/invoices/{invoice_id}/messages', status_code=201)
+def send_invoice_message(invoice_id: int, body: InvoiceMessageInput, db: Session = Depends(db_session), user=Depends(current_user)):
+    invoice = message_invoice(db, user, invoice_id)
+    uploader_id = invoice.source_file.uploaded_by
+    message = body.body.strip()
+    if not message:
+        fail('Vui lòng nhập nội dung tin nhắn', 422)
+    if user.id != uploader_id:
+        recipient_id = uploader_id
+    else:
+        recipient_id = body.recipient_id
+        if recipient_id is None:
+            fail('Vui lòng chọn người nhận', 422)
+        existing = db.scalar(select(InvoiceMessage.id).where(
+            InvoiceMessage.invoice_id == invoice.id,
+            InvoiceMessage.sender_id == recipient_id,
+            InvoiceMessage.recipient_id == user.id,
+        ).limit(1))
+        if existing is None:
+            fail('Chỉ có thể trả lời kế toán đã nhắn về hóa đơn này', 403)
+
+    recipient = db.get(User, recipient_id)
+    if not recipient or recipient.status != 'active' or (user.id == uploader_id and recipient.role != 'accountant'):
+        fail('Người nhận hiện không thể nhận tin nhắn', 409)
+    db.add(InvoiceMessage(invoice_id=invoice.id, sender_id=user.id, recipient_id=recipient.id, body=message))
+    number = invoice.invoice_number or f'#{invoice.id}'
+    notify(db, recipient.id, INVOICE_MESSAGE_TITLE, f'{user.full_name} đã gửi tin nhắn về hóa đơn {number}.',
+           invoice_id=invoice.id, event_type='invoice_message')
+    db.commit()
+    return {'sent': True}
+
+
 @app.get('/api/v1/invoices/{invoice_id}')
 def invoice_detail(invoice_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
     return inv_ser(invoice_allowed(db,user,invoice_id),db,True)
@@ -679,6 +820,10 @@ def notifications(db:Session=Depends(db_session),user=Depends(current_user)):
         values=extras.get(item.id,())
         index=0
         event_type=values[index] if has_type and values[index] else 'legacy'
+        if event_type == 'legacy' and item.invoice_id is not None and item.title == INVOICE_MESSAGE_TITLE:
+            event_type = 'invoice_message'
+        if event_type == 'legacy' and item.invoice_id is None and item.title == 'Tin nhắn mới':
+            event_type = 'direct_message'
         index+=1 if has_type else 0
         read_at=values[index] if has_read_at else None
         result.append({'id':item.id,'title':item.title,'message':item.message,'type':event_type,'is_read':item.is_read,'invoice_id':item.invoice_id,'schedule_id':item.schedule_id,'created_at':item.created_at.isoformat() if item.created_at else None,'read_at':read_at.isoformat() if hasattr(read_at,'isoformat') else str(read_at) if read_at else None})
