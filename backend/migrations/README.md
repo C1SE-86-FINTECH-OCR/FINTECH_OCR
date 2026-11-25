@@ -1,5 +1,16 @@
 ﻿# Phase 2 PostgreSQL schema expansion
 
+## One-command upgrade for existing databases
+
+Stop the API and back up the intended database first. From `backend/`, using the configured database URL and active virtual environment:
+
+```powershell
+python -m migrations.upgrade_existing
+python -m migrations.upgrade_existing --apply
+```
+
+The first command only displays the target (password masked); run the second only after checking it. The runner reuses the existing additive Profile, Report and Schedule migrations in order, then creates missing invoice/direct message tables. It does not run test-only Phase 2 migrations or reset data. A pre-existing base schema is required. For a new SQLite development database, start the API as usual.
+
 ## Existing Profile, Report, and Schedule databases
 
 Run the additive migrations from `backend/` against the intended database URL
