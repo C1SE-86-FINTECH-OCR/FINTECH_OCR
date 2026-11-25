@@ -298,7 +298,7 @@ def query_aggregates(db: Session, user: Any, plan: dict[str, Any], base_invoice_
         return {'facts':facts,'labels':labels}
     if domain=='schedule':
         query=select(Schedule)
-        if user.role=='employee' or plan['scope']=='personal': query=query.where(Schedule.assigned_to==user.id)
+        if user.role in ('employee', 'accountant') or plan['scope']=='personal': query=query.where(Schedule.assigned_to==user.id)
         if start: query=query.where(Schedule.starts_at>=datetime.combine(start,datetime.min.time(),tzinfo=VN_TZ))
         if end: query=query.where(Schedule.starts_at<datetime.combine(end+timedelta(days=1),datetime.min.time(),tzinfo=VN_TZ))
         schedules=db.scalars(query.order_by(Schedule.starts_at)).all()

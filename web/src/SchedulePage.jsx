@@ -39,7 +39,7 @@ export default function SchedulePage({ user }) {
   const isAccountant = user.role === 'accountant';
   const isEmployee = user.role === 'employee';
   const canCreate = isAdmin;
-  const canFilterEmployees = isAdmin || isAccountant;
+  const canFilterEmployees = isAdmin;
   const [items, setItems] = useState([]), [employees, setEmployees] = useState([]);
   const [anchor, setAnchor] = useState(() => fromKey(dateKey(new Date()))), [view, setView] = useState('month');
   const [employeeFilter, setEmployeeFilter] = useState(''), [statusFilter, setStatusFilter] = useState('');
@@ -49,7 +49,8 @@ export default function SchedulePage({ user }) {
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const [datePickerOpen, setDatePickerOpen] = useState(false), [pickerAnchor, setPickerAnchor] = useState(() => fromKey(dateKey(new Date()))), [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
   const dateButtonRef = useRef(null), datePopupRef = useRef(null);
-  const activeEmployees = employees.filter(x => x.role === 'employee' && x.status === 'active');
+  const formatPersonLabel = p => p ? `${p.full_name}${p.role === 'accountant' ? ' (Kế toán)' : p.role === 'employee' ? ' (Nhân viên)' : ''}` : '';
+  const activeEmployees = employees.filter(x => (x.role === 'employee' || x.role === 'accountant') && x.status === 'active');
   const filterEmployees = useMemo(() => { const byId = new Map(activeEmployees.map(e => [String(e.id), e])); items.forEach(x => { if (!byId.has(String(x.assigned_to))) byId.set(String(x.assigned_to), { id: x.assigned_to, full_name: x.employee_name }); }); return [...byId.values()].sort((a, b) => a.full_name.localeCompare(b.full_name, 'vi')); }, [activeEmployees, items]);
 
   const load = useCallback(async () => {
@@ -169,8 +170,8 @@ export default function SchedulePage({ user }) {
     catch (e) { setError(e.message); }
   }
 
-  const pageTitle = isAdmin ? 'Quản lý lịch công tác' : isAccountant ? 'Lịch công tác (Chế độ xem)' : 'Lịch công tác của tôi';
-  const pageDescription = isAdmin ? 'Phân công, lập kế hoạch và điều chỉnh lịch công tác của nhân viên.' : isAccountant ? 'Theo dõi lịch trình công tác của nhân viên văn phòng (Kế toán chỉ xem).' : 'Theo dõi và tự điều chỉnh lịch công tác phù hợp của bạn.';
+  const pageTitle = isAdmin ? 'Quản lý lịch công tác' : 'Lịch công tác của tôi';
+  const pageDescription = isAdmin ? 'Phân công, lập kế hoạch và điều chỉnh lịch công tác của nhân viên và kế toán.' : isAccountant ? 'Theo dõi lịch trình công tác của bạn (Kế toán chỉ xem).' : 'Theo dõi và tự điều chỉnh lịch công tác phù hợp của bạn.';
   const periodLabel = view === 'month' ? `Tháng ${Number(monthParts.month)} năm ${monthParts.year}` : `${shortDateLabel(days[0])} - ${shortDateLabel(days[6])}`;
 
   return <div className="schedule-page">
@@ -180,7 +181,7 @@ export default function SchedulePage({ user }) {
 
     <div className="schedule-toolbar">
       <div className="schedule-filters">
-        {canFilterEmployees && <label><Users size={16}/><select aria-label="Lọc theo nhân viên" value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}><option value="">Tất cả nhân viên</option>{filterEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>}
+        {canFilterEmployees && <label><Users size={16}/><select aria-label="Lọc theo nhân viên" value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}><option value="">Tất cả người được phân công</option>{filterEmployees.map(e => <option key={e.id} value={e.id}>{formatPersonLabel(e)}</option>)}</select></label>}
         <label><CalendarDays size={16}/><select aria-label="Lọc theo trạng thái" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">Tất cả trạng thái</option>{STATUS_KEYS.map(key => <option key={key} value={key}>{STATUS_CONFIG[key].label}</option>)}</select></label>
       </div>
     </div>
@@ -232,7 +233,7 @@ export default function SchedulePage({ user }) {
             <div className="schedule-time-pair"><label>Giờ bắt đầu<input required type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })}/></label><label>Giờ kết thúc<input required type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })}/></label></div>
             <label>Địa điểm<input required maxLength="255" value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} placeholder="Thành phố, địa chỉ"/></label>
             {isAdmin ? (
-              <label>Nhân viên được phân công<select required value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} disabled={employeeBusy}><option value="">Chọn nhân viên</option>{activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>
+              <label>Người được phân công<select required value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} disabled={employeeBusy}><option value="">Chọn người được phân công</option>{activeEmployees.map(e => <option key={e.id} value={e.id}>{formatPersonLabel(e)}</option>)}</select></label>
             ) : (
               <label>Nhân viên<input type="text" value={user.full_name} disabled/><small className="schedule-field-hint">Lịch công tác được phân cho chính bạn</small></label>
             )}

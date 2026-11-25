@@ -1684,8 +1684,9 @@ def test_cancelled_schedule_cannot_be_restored_over_an_active_conflict(api_env):
     conflict = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=admin_headers)
     assert conflict.status_code == 409
     assert "trùng thời gian" in conflict.json()["detail"]
-    current = client.get("/api/v1/schedules", headers=accountant_headers).json()
+    current = client.get("/api/v1/schedules", headers=admin_headers).json()
     assert next(item for item in current if item["id"] == trip_id)["status"] == "cancelled"
+    assert not any(item["id"] == trip_id for item in client.get("/api/v1/schedules", headers=accountant_headers).json())
 
     assert client.patch(f"/api/v1/schedules/{blocker.json()['id']}", json={"status": "cancelled"}, headers=admin_headers).status_code == 200
     restored = client.patch(f"/api/v1/schedules/{trip_id}", json={"status": "planned"}, headers=admin_headers)
@@ -1712,7 +1713,8 @@ def test_multiday_schedule_conflict_and_ranking_count_one_trip(api_env):
     assigned_headers = {"Authorization": f"Bearer {employee}"}
     assert created.json()["start_date"] < created.json()["end_date"]
     assert sum(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=assigned_headers).json()) == 1
-    assert any(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=accountant_headers).json())
+    assert any(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=admin_headers).json())
+    assert not any(item["id"] == created.json()["id"] for item in client.get("/api/v1/schedules", headers=accountant_headers).json())
 
     middle_day_start = starts + timedelta(days=1, hours=2)
     conflict = client.post("/api/v1/schedules", json={
