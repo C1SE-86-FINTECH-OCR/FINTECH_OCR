@@ -15,10 +15,12 @@ export function invoiceItemDrafts(items) {
   }));
 }
 
-function nullableNumber(value) {
-  if (value == null || String(value).trim() === '') return null;
+export function nullableNumber(value) {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
+  if (!['number', 'string'].includes(typeof value)) throw new Error('Giá trị số không hợp lệ; dữ liệu chưa được lưu.');
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (!Number.isFinite(parsed)) throw new Error('Giá trị số không hợp lệ; dữ liệu chưa được lưu.');
+  return parsed;
 }
 
 export function invoiceItemPayload(items) {
