@@ -1,0 +1,10 @@
+.brand .fintech-mark{width:37px;height:44px;flex-shrink:0;object-fit:contain}
+.brand .fintech-wordmark{font-family:Arial,Helvetica,sans-serif;font-size:21px;font-weight:750;letter-spacing:-.025em;line-height:1.15;color:#080808;white-space:nowrap}
+.brand .fintech-wordmark strong{font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:500;letter-spacing:.015em;line-height:1.4;color:#555;margin-top:3px;white-space:nowrap}
+.brand:has(.fintech-mark){gap:14px}
+.brand-light .fintech-mark{filter:invert(1)}
+.brand-light .fintech-wordmark{color:#fff}
+.brand-light .fintech-wordmark strong{color:#c2c4c8}
+.logo-circle.fintech-login-mark{background:transparent;border-radius:0;width:48px;height:56px}
+.fintech-login-mark .fintech-mark{width:48px;height:56px}
+.login-wrap .login-aside:after{content:'';width:80%;height:70%;background:url('./assets/fintech-logo.svg') center/contain no-repeat;filter:invert(1);opacity:.035;top:15%;left:10%}

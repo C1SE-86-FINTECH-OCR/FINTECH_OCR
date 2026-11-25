@@ -1,8 +1,9 @@
+import BrandLogo,{BrandMark} from './BrandLogo.jsx';
 import InvoiceDateFilter from './InvoiceDateFilter.jsx';
 import {invoiceDateRange} from './invoiceDateFilter.js';
 import React,{createContext,useContext,useRef,useState,useEffect,useCallback} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
-import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,ScanText,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark} from 'lucide-react';
+import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,ScanText,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark,Globe} from 'lucide-react';
 import {api,authStore,money,datefmt,roleName,approvalName,documentTypeName,ROOT} from './api';
 import SpendingChart from './SpendingChart';
 import QuickInvoiceSearch from './QuickInvoiceSearch';
@@ -61,9 +62,9 @@ function Title({eyebrow,title,description,action}){return <header className="pag
 function Pill({children,type='default'}){return <span className={`pill pill-${type}`}>{children}</span>}
 const stateType=s=>({approved:'green',valid:'green',verified:'green',pending:'orange',needs_review:'orange',draft:'gray',rejected:'red',error:'red',mismatch:'red',not_found:'red',completed:'green',in_progress:'orange'})[s]||'gray';
 function Status({value}){return <Pill type={stateType(value)}>{approvalName(value)||value}</Pill>}
-function Login({onLogin}){const[email,setEmail]=useState('employee@fintech.local'),[password,setPassword]=useState('Password@123'),[error,setError]=useState(''),[loading,setLoading]=useState(false);
+function Login({onLogin}){const[email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(false);
 async function submit(e){e.preventDefault();setLoading(true);setError('');try{let res=await api('/auth/login',{method:'POST',body:{email,password}});authStore.set(res.access_token);onLogin(res.user)}catch(e){setError(e.message)}finally{setLoading(false)}}
-return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><span className="brand-symbol">◈</span><span>FINTECH<strong>OCR / KHÔNG GIAN LÀM VIỆC</strong></span></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1 style={{fontSize:'clamp(38px, 3.8vw, 62px)',lineHeight:1.15,letterSpacing:'-0.035em',fontWeight:750}}>
+return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><BrandLogo/></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1 style={{fontSize:'clamp(38px, 3.8vw, 62px)',lineHeight:1.15,letterSpacing:'-0.035em',fontWeight:750}}>
   Từ hóa đơn giấy<br/>đến{' '}<em>dữ liệu chuẩn xác.</em>
 </h1>
 <p>Số hóa hóa đơn. Chuẩn hóa dữ liệu. Tối ưu chi tiêu.<br/>Nền tảng quản lý tài chính thông minh dành cho doanh nghiệp.</p>
@@ -83,7 +84,7 @@ return <div className="login-wrap"><div className="login-aside"><div className="
       </React.Fragment>
     ))}
   </div>
-</div></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle">◈</div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack"><label>Địa chỉ email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form><div className="demo-account"><strong>TÀI KHOẢN DÙNG THỬ</strong>{['employee','accountant','admin'].map(role=><button key={role} onClick={()=>{setEmail(role+'@fintech.local');setPassword('Password@123')}}>{roleName(role)}<span>Dùng tài khoản này ↗</span></button>)}<small>Mật khẩu: Password@123 · Chỉ dùng để phát triển</small></div></div></div></div>}
+</div></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
 const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
 function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
@@ -189,7 +190,7 @@ function Shell({user,onLogout,children}) {
   return <NotificationContext.Provider value={notificationState}>
     <div className={'app-shell '+(menu?'menu-open':'')}>
       <aside className={'sidebar '+(menu?'open':'')}>
-        <NavLink to="/" aria-label="Trang chủ FINTECH OCR" className="brand"><span className="brand-symbol">{'\u25c8'}</span><span>FINTECH<strong>OCR / KHÔNG GIAN LÀM VIỆC</strong></span></NavLink>
+        <NavLink to="/" aria-label="Trang chủ FINTECH OCR" className="brand"><BrandLogo/></NavLink>
         <span className="role-tag">{roleName(user.role)}</span>
         <nav className="nav">{navItems(user.role).map(([to,label,Icon])=><NavLink key={to} to={to} end={to==='/'} className={({isActive})=>'nav-item '+(isActive?'active':'')}>
           <Icon size={18}/><span>{label}</span>{label==="Thông báo"&&unread>0&&<b className="nav-count">{unread}</b>}
@@ -378,6 +379,7 @@ function HomePage({ user }) {
   const inv = useLoad('/invoices');
   const sched = useLoad('/schedules');
   const navigate = useNavigate();
+  const [chatPrompt, setChatPrompt] = useState('');
   const summary = data || {};
   const employee = user.role === 'employee';
   const stats = [
@@ -386,6 +388,16 @@ function HomePage({ user }) {
     ["Chờ phê duyệt", summary.pending, Clock3, 'pending'],
     ["Đã từ chối", summary.rejected, XCircle, 'rejected'],
   ];
+
+  function handleChatSubmit(e){
+    e.preventDefault();
+    const q=chatPrompt.trim();
+    if(q){
+      navigate('/chat',{state:{initialQuestion:q}});
+    }else{
+      navigate('/chat');
+    }
+  }
 
   return <>
     <Title
@@ -426,7 +438,29 @@ function HomePage({ user }) {
             {!sched.data?.length && <Empty label="Chưa có lịch công tác"/>}
           </div>
         </section>
-        <section className="panel black-panel"><MessageSquare size={21}/><h3>Trao đổi về hóa đơn</h3><p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p><button onClick={() => navigate('/chat')} className="black-input">Nhập câu hỏi...<ArrowRight size={18}/></button></section>
+        <section className="panel black-panel">
+          <MessageSquare size={21}/>
+          <h3>Trao đổi về hóa đơn</h3>
+          <p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p>
+          <form className="black-input-form" onSubmit={handleChatSubmit}>
+            <input
+              type="text"
+              className="black-input-field"
+              placeholder="Nhập câu hỏi..."
+              value={chatPrompt}
+              onChange={e=>setChatPrompt(e.target.value)}
+              aria-label="Nhập câu hỏi cho trợ lý AI"
+            />
+            <button
+              type="submit"
+              className="black-input-submit"
+              title="Gửi câu hỏi đến Trợ lý AI"
+              aria-label="Gửi câu hỏi"
+            >
+              <ArrowRight size={18}/>
+            </button>
+          </form>
+        </section>
       </div>
     </>}
   </>;
@@ -687,11 +721,12 @@ function compressImage(file,maxDimension=1280,quality=0.85){
 }
 
 function ChatPage({user}){
+  const location=useLocation();
+  const [params,setParams]=useSearchParams();
+  const lastSentInitRef=useRef('');
   const [question,setQuestion]=useState('');
   const [attachedImage,setAttachedImage]=useState(null);
-  const [messages,setMessages]=useState([
-    {role:'assistant',content:'Xin chào! Tôi là trợ lý AI thông minh của **FINTECH OCR**. Bạn có thể hỏi tôi về hóa đơn, lịch công tác trong hệ thống hoặc các câu hỏi phân tích, kiến thức phổ thông, toán học và lập trình.'}
-  ]);
+  const [messages,setMessages]=useState([]);
   const [sending,setSending]=useState(false);
   const [streamingText,setStreamingText]=useState('');
   const [connection,setConnection]=useState(null);
@@ -782,10 +817,7 @@ function ChatPage({user}){
     setConversationId(null);
     setActiveTitle('Cuộc trò chuyện mới');
     setActiveDate('');
-    setMessages([{
-      role:'assistant',
-      content:'Xin chào! Tôi là trợ lý AI thông minh của **FINTECH OCR**. Bạn có thể hỏi tôi về hóa đơn, lịch công tác trong hệ thống hoặc các câu hỏi phân tích, kiến thức phổ thông, toán học và lập trình.'
-    }]);
+    setMessages([]);
     setQuestion('');
     setAttachedImage(null);
   }
@@ -941,6 +973,24 @@ function ChatPage({user}){
     }
   }
 
+  useEffect(()=>{
+    const initQ=(location.state?.initialQuestion||params.get('q')||'').trim();
+    if(initQ&&lastSentInitRef.current!==initQ){
+      lastSentInitRef.current=initQ;
+      if(location.state?.initialQuestion){
+        window.history.replaceState({},document.title);
+      }
+      if(params.get('q')){
+        setParams(p=>{
+          const next=new URLSearchParams(p);
+          next.delete('q');
+          return next;
+        },{replace:true});
+      }
+      submitWithText(initQ);
+    }
+  },[location.state,params]);
+
   function submit(e){
     e.preventDefault();
     submitWithText(question);
@@ -971,12 +1021,6 @@ function ChatPage({user}){
 
   const {today,last7,older}=groupConvs(conversations);
 
-  const SUGGESTED_CHIPS=[
-    'Phân tích theo nhân viên',
-    'So sánh với tháng trước',
-    'Xem danh sách hóa đơn cần duyệt',
-    'Thống kê chi phí theo nhà cung cấp'
-  ];
 
   const connectionLabel=!connection?'Đang kiểm tra kết nối Gemini…':connection.connected?`Gemini đã sẵn sàng · ${connection.model}`:connection.state==='not_configured'?'Chưa cấu hình Gemini':'Gemini tạm thời ngoại tuyến (sử dụng chế độ dữ liệu nội bộ)';
 
@@ -1127,27 +1171,52 @@ function ChatPage({user}){
               );
             }
 
-            const sources=extractSources(m.content);
+            const internalSources=extractSources(m.content);
+            const webSources=m.meta?.web_sources||[];
+            const hasInternalData=(m.meta&&m.meta.kind&&m.meta.kind!=='ordinary'&&(m.meta.db_time_ms>0||m.meta.count_visible_invoices!=null));
+            const isVerified=internalSources.length>0||webSources.length>0||hasInternalData;
 
             return (
               <div className="chat-row-assistant" key={i}>
                 <div className="chat-assistant-head">
                   <Sparkles size={16} color="#2563eb"/>
                   <span>Fintech AI</span>
-                  <span className="chat-source-verified-badge">Nguồn đã xác thực</span>
+                  {isVerified&&(
+                    <span className="chat-source-verified-badge" title="Thông tin có căn cứ xác minh từ hệ thống hoặc nguồn tra cứu">
+                      Nguồn đã xác thực
+                    </span>
+                  )}
                 </div>
 
                 <div className="chat-assistant-body">
                   <ChatMarkdown>{m.content}</ChatMarkdown>
                 </div>
 
-                {sources.length>0&&(
+                {(internalSources.length>0||webSources.length>0)&&(
                   <div className="chat-sources-row">
-                    <span className="chat-sources-label">Nguồn:</span>
-                    {sources.map(s=>(
-                      <NavLink key={s} to="/invoices" className="chat-source-tag" title="Xem hóa đơn">
+                    <span className="chat-sources-label">
+                      {internalSources.length>0&&webSources.length>0
+                        ?'Nguồn tham khảo:'
+                        :internalSources.length>0
+                        ?'Nguồn nội bộ (Hóa đơn):'
+                        :'Nguồn kiểm chứng (Web):'}
+                    </span>
+                    {internalSources.map(s=>(
+                      <NavLink key={s} to="/invoices" className="chat-source-tag" title="Xem hóa đơn nội bộ">
                         <FileText size={12}/> {s} <ExternalLink size={10}/>
                       </NavLink>
+                    ))}
+                    {webSources.map((ws,wIdx)=>(
+                      <a
+                        key={wIdx}
+                        href={ws.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chat-source-tag chat-source-tag-web"
+                        title={ws.title||ws.url}
+                      >
+                        <Globe size={12}/> {ws.title?(ws.title.length>32?ws.title.slice(0,32)+'…':ws.title):'Nguồn web'} <ExternalLink size={10}/>
+                      </a>
                     ))}
                   </div>
                 )}
@@ -1222,20 +1291,6 @@ function ChatPage({user}){
             )
           )}
 
-          {!sending&&messages.length>0&&messages[messages.length-1].role==='assistant'&&(
-            <div className="chat-suggestions-row">
-              {SUGGESTED_CHIPS.map((chip,idx)=>(
-                <button
-                  key={idx}
-                  type="button"
-                  className="chat-suggestion-chip"
-                  onClick={()=>submitWithText(chip)}
-                >
-                  {chip} <ArrowRight size={12}/>
-                </button>
-              ))}
-            </div>
-          )}
 
           <div ref={messagesEnd}/>
         </div>
