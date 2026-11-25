@@ -1,10 +1,10 @@
-
 <?xml version="1.0" encoding="UTF-8"?>
 <HDon>
   <DLHDon>
     <TTChung>
       <SHDon>UAT9F-XML-001</SHDon>
       <NLap>2026-11-08</NLap>
+      <KHHDon>K26TAA</KHHDon>
     </TTChung>
     <NDHDon>
       <NBan>
@@ -14,18 +14,18 @@
       <NMua>
         <Ten>FINTECH OCR Test Buyer</Ten>
         <MST>0107654321</MST>
-        <DSHHDVu>
-          <HHDVu>
-            <THHDVu>Test service UAT 9F XML</THHDVu>
-            <ThTien>200000</ThTien>
-          </HHDVu>
-        </DSHHDVu>
-        <TToan>
-          <TgTCTHue>200000</TgTCTHue>
-          <TgTThue>16000</TgTThue>
-          <TgTTTBSo>216000</TgTTTBSo>
-        </TToan>
       </NMua>
+      <DSHHDVu>
+        <HHDVu>
+          <THHDVu>Test service UAT 9F XML</THHDVu>
+          <ThTien>200000</ThTien>
+        </HHDVu>
+      </DSHHDVu>
+      <TToan>
+        <TgTCThue>200000</TgTCThue>
+        <TgTThue>16000</TgTThue>
+        <TgTTTBSo>216000</TgTTTBSo>
+      </TToan>
     </NDHDon>
   </DLHDon>
 </HDon>

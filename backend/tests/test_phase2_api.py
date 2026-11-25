@@ -1166,7 +1166,9 @@ def test_dashboard_exposes_validation_supplier_and_monthly_tax_totals(api_env):
     assert reversed_range.status_code == 422
 
 
-def test_database_chat_answers_are_role_scoped(api_env):
+def test_database_chat_answers_are_role_scoped(api_env, monkeypatch):
+    observed=[]
+    monkeypatch.setattr(api_main.gemini_chat, 'answer_for', lambda plan, facts, previous_plan=None: observed.append((plan,facts)) or 'Trả lời theo số liệu tổng hợp.')
     client, _, password = api_env
     employee = _token(client, "employee1@phase2.test", password)
     accountant = _token(client, "accountant@phase2.test", password)
@@ -1181,9 +1183,11 @@ def test_database_chat_answers_are_role_scoped(api_env):
         headers={"Authorization": f"Bearer {accountant}"},
     )
     assert employee_answer.status_code == accountant_answer.status_code == 200
-    assert employee_answer.json()["count_visible_invoices"] == 3
-    assert accountant_answer.json()["count_visible_invoices"] == 4
-    assert employee_answer.json()["mode"] == "database-demo"
+    assert observed[0][1]['scope']=='personal'
+    assert observed[0][1]['amount']=='600.00'
+    assert accountant_answer.json()['mode']=='backend-aggregate'
+    assert employee_answer.json()["mode"] == "gemini-aggregates"
+    assert employee_answer.json()["gemini_connected"] is True
 
 
 def test_user_management_profile_password_and_disabled_account(api_env):
