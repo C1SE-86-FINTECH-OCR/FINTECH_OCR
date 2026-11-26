@@ -49,11 +49,12 @@ The **project specification** additionally targets PostgreSQL + pgvector, Tailwi
    pip install -r requirements.txt
    ```
 4. Copy `.env.example` to `.env`, configure a **unique** `JWT_SECRET`, and select a suitable database.
-5. Start the API:
+5. For an **existing** database, stop the API, back up the database, and follow [the migration instructions](backend/migrations/README.md). Run `python -m migrations.upgrade_existing` to check the target and `python -m migrations.upgrade_existing --apply` to apply the additive upgrades. Skip this for a new SQLite development database.
+6. Start the API:
    ```bash
    uvicorn app.main:app --reload
    ```
-6. Check `http://localhost:8000/health`.
+7. Check `http://localhost:8000/health`.
 
 > The example configuration defaults to local SQLite. PostgreSQL setup requires a separately prepared schema/migration process. Do not apply the test-only migration to the main database.
 

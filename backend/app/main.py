@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -7,12 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 from collections import Counter,defaultdict
 from math import isfinite
-import hashlib, re, json, unicodedata
+import hashlib, re, json, unicodedata, time
 import logging
 from copy import copy
 from weakref import WeakKeyDictionary
 import jwt
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Body, Response
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Body, Response, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse,StreamingResponse,JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -23,11 +23,13 @@ from sqlalchemy import bindparam, inspect as sa_inspect, select,func,desc,text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from openpyxl import Workbook
-from .core import Base,engine,db_session,current_user,require_roles,settings,hash_password,verify_password,make_token,bearer,storage_dir
+from .core import Base,engine,db_session,current_user,require_roles,settings,hash_password,verify_password,make_token,bearer,storage_dir,SessionLocal
 from .models import *
 from .invoice_search import apply_invoice_search, normalize_search
 from .extraction import text_from_file,extract_fields,extract_line_items,validate
 from .risk_checks import assess_invoice_risks
+from . import gemini_chat
+from . import chatbot_queries
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +241,9 @@ class ScheduleEdit(BaseModel):
     notes:str|None=Field(default=None,max_length=5000)
     status:str|None=None
 class ChatInput(BaseModel):
-    question:str=Field(min_length=2,max_length=1000)
+    question:str=Field(default='',max_length=1000)
+    conversation_id:int|None=Field(default=None,gt=0)
+    image_base64:str|None=None
 class ProfileEdit(BaseModel):
     full_name:str=Field(min_length=2,max_length=150)
     phone:str|None=Field(default=None,max_length=30)
@@ -291,7 +295,7 @@ def logout(credentials:HTTPAuthorizationCredentials=Depends(bearer),user=Depends
 def users(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):return [ser(u) for u in db.scalars(select(User).order_by(User.id)).all()]
 @app.get('/api/v1/directory/employees')
 def directory_employees(db:Session=Depends(db_session),user=Depends(require_roles('admin','accountant'))):
-    return [ser(u) for u in db.scalars(select(User).where(User.role=='employee',User.status=='active').order_by(User.full_name)).all()]
+    return [ser(u) for u in db.scalars(select(User).where(User.role.in_(['employee','accountant']),User.status=='active').order_by(User.full_name)).all()]
 
 def employee_profile_data(target,viewer,scores):
     score=next(((index+1,row['completed']) for index,row in enumerate(scores) if row['user_id']==target.id),None)
@@ -850,14 +854,23 @@ def read_all(db:Session=Depends(db_session),user=Depends(current_user)):
 @app.get('/api/v1/schedules')
 def schedules(assigned_to:int|None=None,status:str='',db:Session=Depends(db_session),user=Depends(current_user)):
     q=select(Schedule).order_by(Schedule.starts_at)
-    if user.role=='employee':
-        if assigned_to is not None and assigned_to!=user.id:fail('Bạn chỉ được xem lịch công tác của mình',403)
-        q=q.where(Schedule.assigned_to==user.id)
-    elif assigned_to is not None:q=q.where(Schedule.assigned_to==assigned_to)
+    if user.role != 'admin':
+        if assigned_to is not None and assigned_to != user.id:
+            fail('Bạn chỉ được xem lịch công tác của mình', 403)
+        q=q.where(Schedule.assigned_to == user.id)
+    elif assigned_to is not None:
+        q=q.where(Schedule.assigned_to == assigned_to)
     if status:
         if status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ',422)
         q=q.where(Schedule.status==status)
     return [schedule_ser(s,db) for s in db.scalars(q).all()]
+@app.get('/api/v1/schedules/{schedule_id}')
+def schedule_detail(schedule_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    s=db.get(Schedule,schedule_id)
+    if not s:fail('Không tìm thấy lịch',404)
+    if user.role != 'admin' and s.assigned_to != user.id:
+        fail('Bạn chỉ được xem lịch công tác của mình',403)
+    return schedule_ser(s,db)
 def schedule_ser(s,db):
     u=db.get(User,s.assigned_to)
     creator=db.get(User,s.created_by)
@@ -875,9 +888,13 @@ def ensure_schedule_available(db,assigned_to,starts_at,ends_at,exclude_id=None):
     conflict=db.scalar(q.limit(1))
     if conflict:fail('Nhân viên đã có lịch công tác trùng thời gian. Hãy chọn khung giờ khác.',409)
 @app.post('/api/v1/schedules',status_code=201)
-def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depends(current_user)):
+    if user.role == 'accountant':
+        fail('Kế toán chỉ có quyền xem lịch công tác, không có quyền tạo hoặc thay đổi lịch', 403)
+    if user.role != 'admin':
+        fail('Chỉ có quản trị viên mới có quyền tạo và phân lịch công tác', 403)
     employee=db.get(User,data.assigned_to)
-    if not employee or employee.role!='employee' or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    if not employee or employee.role not in ('employee','accountant') or employee.status!='active':fail('Chỉ có thể giao lịch cho nhân viên hoặc kế toán đang hoạt động')
     starts_at=schedule_datetime(data.starts_at);ends_at=schedule_datetime(data.ends_at)
     if ends_at<=starts_at:fail('Thời gian kết thúc phải sau thời gian bắt đầu')
     ensure_schedule_available(db,employee.id,starts_at,ends_at)
@@ -889,18 +906,29 @@ def schedule_create(data:ScheduleInput,db:Session=Depends(db_session),user=Depen
     values['created_at']=datetime.now(timezone.utc)
     values['updated_at']=values['created_at']
     s=Schedule(**values,created_by=user.id)
-    db.add(s);db.flush();notify(db,employee.id,'Lịch công tác mới',f'{s.title} – {s.destination}',schedule_id=s.id,event_type='schedule_assigned')
+    db.add(s);db.flush()
+    if employee.id != user.id:
+        notify(db,employee.id,'Lịch công tác mới',f'{s.title} – {s.destination}',schedule_id=s.id,event_type='schedule_assigned')
     audit(db,user.id,'schedule.created','schedule',s.id);db.commit();return schedule_ser(s,db)
 @app.patch('/api/v1/schedules/{schedule_id}')
-def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
+def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_session),user=Depends(current_user)):
     s=db.get(Schedule,schedule_id)
     if not s:fail('Không tìm thấy lịch',404)
+    if user.role == 'accountant':
+        fail('Kế toán chỉ có quyền xem lịch công tác, không có quyền thay đổi lịch', 403)
+    if user.role == 'employee':
+        if s.assigned_to != user.id:
+            fail('Nhân viên chỉ có thể tự điều chỉnh lịch công tác của chính mình', 403)
+        if body.assigned_to is not None and body.assigned_to != user.id:
+            fail('Bạn không thể chuyển giao lịch công tác cho người khác', 403)
+    elif user.role != 'admin':
+        fail('Không có quyền điều chỉnh lịch công tác', 403)
     changes=body.model_dump(exclude_unset=True)
     if not changes:fail('Không có thông tin nào để cập nhật')
     if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)
     old_assigned=s.assigned_to;previous_status=s.status
     employee=db.get(User,body.assigned_to) if body.assigned_to is not None else None
-    if body.assigned_to is not None and (not employee or employee.role!='employee' or employee.status!='active'):fail('Chỉ có thể giao lịch cho nhân viên đang hoạt động')
+    if body.assigned_to is not None and (not employee or employee.role not in ('employee','accountant') or employee.status!='active'):fail('Chỉ có thể giao lịch cho nhân viên hoặc kế toán đang hoạt động')
     if body.status is not None and body.status not in ('planned','in_progress','completed','cancelled'):fail('Trạng thái lịch không hợp lệ')
     starts_at=schedule_datetime(body.starts_at) if body.starts_at is not None else schedule_db_datetime(s.starts_at)
     ends_at=schedule_datetime(body.ends_at) if body.ends_at is not None else schedule_db_datetime(s.ends_at)
@@ -924,13 +952,14 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
     if body.status is not None:s.status=body.status
     s.completed_at=datetime.now(timezone.utc) if s.status=='completed' and previous_status!='completed' else s.completed_at if s.status=='completed' else None
     now=datetime.now(timezone.utc);_phase2_write_optional(db,'schedules',s.id,{'start_date':starts_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'end_date':ends_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date(),'updated_at':now})
-    if old_assigned!=assigned_to:
+    if old_assigned!=assigned_to and old_assigned!=user.id:
         notify(db,old_assigned,'Lịch công tác đã thay đổi',f'Lịch “{s.title}” đã được phân công cho nhân viên khác.',schedule_id=s.id,event_type='schedule_changed')
     if details_changed or status_changed:
         if s.status=='cancelled':title='Lịch công tác đã hủy';message=f'Lịch “{s.title}” đã bị hủy.';event='schedule_cancelled'
         elif s.status=='completed' and previous_status!='completed':title='Chuyến công tác đã hoàn thành';message=f'Chuyến “{s.title}” đã được xác nhận hoàn thành.';event='schedule_completed'
         else:title='Lịch công tác đã thay đổi';message=f'Lịch “{s.title}” đã được cập nhật.';event='schedule_changed'
-        notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
+        if assigned_to!=user.id:
+            notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
     audit(db,user.id,'schedule.updated','schedule',s.id);db.commit();return schedule_ser(s,db)
 @app.get('/api/v1/ranking')
 def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Session=Depends(db_session),user=Depends(current_user)):
@@ -1039,25 +1068,387 @@ def download_report(report_id:int,db:Session=Depends(db_session),user=Depends(re
 @app.get('/api/v1/audit-logs')
 def audit_logs(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
     return [{'id':a.id,'actor_id':a.actor_id,'action':a.action,'entity_type':a.entity_type,'entity_id':a.entity_id,'created_at':a.created_at.isoformat()} for a in db.scalars(select(AuditLog).order_by(desc(AuditLog.id)).limit(200)).all()]
+IMAGE_PREFIX = "[IMAGE_ATTACHED:"
+
+def parse_image_data(image_data: str | None) -> tuple[bytes | None, str]:
+    if not image_data:
+        return None, "image/jpeg"
+    mime_type = "image/jpeg"
+    raw_b64 = image_data
+    if "," in image_data and "data:" in image_data:
+        header, raw_b64 = image_data.split(",", 1)
+        if ";" in header:
+            mime_type = header.split(";")[0].replace("data:", "").strip()
+    try:
+        import base64
+        data_bytes = base64.b64decode(raw_b64)
+        return data_bytes, mime_type
+    except Exception:
+        return None, "image/jpeg"
+
+SECURITY_REFUSAL = (
+    'Yêu cầu không thể thực hiện vì vi phạm chính sách bảo mật hệ thống. '
+    'Trợ lý AI không được phép tiết lộ mã khóa API, thông tin xác thực, câu lệnh nội bộ hoặc dữ liệu nhạy cảm.'
+)
+
 @app.post('/api/v1/chatbot/ask')
 def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user)):
-    """Role-scoped database query demo; NOT an LLM or RAG implementation."""
-    invoices=db.scalars(invoice_q(db,user)).all()
-    q=body.question.lower()
-    if any(k in q for k in ['tá»•ng tiá»n','tổng chi','bao nhiêu tiền','total spending','amount']):
-        answer=f'Tá»•ng sá»‘ tiá»n cá»§a {len(invoices)} hÃ³a Ä‘Æ¡n báº¡n Ä‘Æ°á»£c phÃ©p xem lÃ  {sum(float(i.total_amount or 0) for i in invoices):,.0f} VND.'
-    elif any(k in q for k in ['chá» duyá»‡t','pending']):
-        answer=f'CÃ³ {sum(i.approval_status=="pending" for i in invoices)} hÃ³a Ä‘Æ¡n Ä‘ang chá» duyá»‡t.'
-    elif any(k in q for k in ['đã duyệt','approved']):
-        answer=f'Có {sum(i.approval_status=="approved" for i in invoices)} hóa đơn đã được phê duyệt.'
-    elif any(k in q for k in ['lỗi','kiểm tra','needs review']):
-        answer=f'Có {sum(i.validation_status=="needs_review" for i in invoices)} hóa đơn cần kiểm tra lại.'
-    elif any(k in q for k in ['nhà cung cấp','supplier']):
-        names=list(dict.fromkeys(i.seller_name for i in invoices if i.seller_name))
-        answer='Nhà cung cấp: '+(', '.join(names[:12]) if names else 'chưa có dữ liệu')+'.'
+    """Answer with classification, role-scoped aggregates, general reasoning and response timing metrics."""
+    t_start = time.perf_counter()
+    db_time = 0.0
+    llm_time = 0.0
+    image_bytes, mime_type = parse_image_data(body.image_base64)
+    effective_question = body.question.strip()
+    if not effective_question and image_bytes:
+        effective_question = 'Hãy đọc, nhận diện và phân tích chi tiết hình ảnh này.'
+    elif not effective_question and not image_bytes:
+        fail('Vui lòng nhập câu hỏi hoặc đính kèm hình ảnh', 400)
+
+    conversation=db.get(Conversation,body.conversation_id) if body.conversation_id else None
+    if body.conversation_id and (not conversation or conversation.user_id!=user.id):
+        fail('Không tìm thấy cuộc trò chuyện hoặc bạn không có quyền truy cập',404)
+    history=[];previous_answer=None;chat_history=[]
+    if conversation:
+        history=list(reversed(db.scalars(select(ChatMessage.content).where(
+            ChatMessage.conversation_id==conversation.id,ChatMessage.role=='user'
+        ).order_by(desc(ChatMessage.id)).limit(12)).all()))
+        previous_answer=db.scalar(select(ChatMessage.content).where(
+            ChatMessage.conversation_id==conversation.id,ChatMessage.role=='assistant'
+        ).order_by(desc(ChatMessage.id)).limit(1))
+        recent_msgs=db.scalars(select(ChatMessage).where(
+            ChatMessage.conversation_id==conversation.id
+        ).order_by(desc(ChatMessage.id)).limit(8)).all()
+        for m in reversed(recent_msgs):
+            t = m.content
+            if t.startswith(IMAGE_PREFIX):
+                idx = t.find("]\n")
+                if idx != -1: t = t[idx+2:]
+            chat_history.append({'role':m.role,'content':t})
+    previous_plan=None
+    for old_question in history:
+        t = old_question
+        if t.startswith(IMAGE_PREFIX):
+            idx = t.find("]\n")
+            if idx != -1: t = t[idx+2:]
+        previous_plan=chatbot_queries.parse_plan(t,role=user.role,previous_context=previous_plan)
+
+    classification=chatbot_queries.classify_chat_question(effective_question,role=user.role,previous_context=previous_plan)
+    kind=classification['kind']
+    if image_bytes and kind != 'security':
+        kind = 'ordinary'
+    plan=classification.get('plan') or chatbot_queries.parse_plan(effective_question,role=user.role,previous_context=previous_plan)
+
+    facts={};display_labels={}
+    mode='gemini-aggregates';fallback_reason=None;gemini_connected=None
+
+    web_sources = []
+    if kind=='security':
+        mode='security-refusal'
+        answer=SECURITY_REFUSAL
+    elif kind=='ordinary' or image_bytes:
+        mode='gemini-general'
+        t_llm0 = time.perf_counter()
+        try:
+            import inspect
+            call_params = inspect.signature(gemini_chat.general_answer).parameters
+            call_kwargs: dict[str, Any] = {}
+            if 'history' in call_params: call_kwargs['history'] = chat_history
+            if 'image_bytes' in call_params and image_bytes: call_kwargs['image_bytes'] = image_bytes
+            if 'mime_type' in call_params and image_bytes: call_kwargs['mime_type'] = mime_type
+            if 'sources_collector' in call_params: call_kwargs['sources_collector'] = web_sources
+            answer = gemini_chat.general_answer(effective_question, **call_kwargs)
+            gemini_connected = True
+            llm_time = round((time.perf_counter() - t_llm0) * 1000, 1)
+        except gemini_chat.GeminiUnavailable as exc:
+            mode='general-fallback';fallback_reason=exc.code;gemini_connected=False
+            answer=gemini_chat.friendly_error(exc.code)
     else:
-        answer='ÄÃ¢y lÃ  báº£n trá»£ lÃ½ truy váº¥n cÆ¡ sá»Ÿ dá»¯ liá»‡u (chÆ°a káº¿t ná»‘i Gemini/RAG). HÃ£y há»i vá» tá»•ng tiá»n, sá»‘ hÃ³a Ä‘Æ¡n chá» duyá»‡t, Ä‘Ã£ duyá»‡t, cáº§n kiá»ƒm tra hoáº·c nhÃ  cung cáº¥p.'
-    conv=Conversation(user_id=user.id,title=body.question[:100]);db.add(conv);db.flush()
-    db.add_all([ChatMessage(conversation_id=conv.id,role='user',content=body.question),ChatMessage(conversation_id=conv.id,role='assistant',content=answer)])
+        t_db0 = time.perf_counter()
+        queried=chatbot_queries.query_aggregates(db,user,plan,invoice_q(db,user))
+        db_time=round((time.perf_counter()-t_db0)*1000,1)
+        facts=queried['facts'];display_labels=queried['labels']
+        metric=plan.get('metric');domain=plan.get('domain')
+        no_data=(domain=='unsupported' or facts.get('denied')
+                 or metric=='amount' and 'formatted_vnd' not in facts
+                 or metric=='count' and facts.get('invoice_count')==0
+                 or metric=='status_distribution' and not facts.get('rows')
+                 or plan.get('group_by') and not facts.get('rows')
+                 or metric=='schedule_stats' and not (facts.get('schedule_count') or facts.get('rows'))
+                 or metric=='summary' and domain=='invoice' and facts.get('invoice_count')==0)
+        safe_previous={k:previous_plan.get(k) for k in ('domain','metric','group_by','period','scope','format','status_filter')} if plan.get('contextual') and previous_plan else None
+        if no_data:
+            mode='backend-aggregate'
+            answer=chatbot_queries.render_fallback(plan,facts,display_labels)
+        else:
+            t_llm0 = time.perf_counter()
+            try:
+                answer=gemini_chat.answer_for(plan,facts,safe_previous)
+                gemini_connected=True
+                llm_time=round((time.perf_counter()-t_llm0)*1000,1)
+                if plan.get('format')=='table':
+                    answer=chatbot_queries.render_fallback(plan,facts,display_labels)
+                else:
+                    answer=chatbot_queries.apply_display_labels(answer,display_labels)
+                    if plan.get('format')=='list' and not re.search(r'(?m)^\s*[-*•]\s+',answer):
+                        answer=chatbot_queries.render_fallback(plan,facts,display_labels)
+                    if previous_answer and previous_answer.strip()==answer.strip() and history and effective_question!=history[-1].strip():
+                        answer=chatbot_queries.render_fallback(plan,facts,display_labels)
+            except gemini_chat.GeminiUnavailable as exc:
+                mode='database-fallback';fallback_reason=exc.code;gemini_connected=False
+                answer='Đang sử dụng chế độ dự phòng (số liệu truy vấn từ backend). '+chatbot_queries.render_fallback(plan,facts,display_labels)
+
+    user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
+    if not conversation:
+        conversation=Conversation(user_id=user.id,title=effective_question[:100]);db.add(conversation);db.flush()
+    db.add_all([ChatMessage(conversation_id=conversation.id,role='user',content=user_content),ChatMessage(conversation_id=conversation.id,role='assistant',content=answer)])
     db.commit()
-    return {'answer':answer,'mode':'database-demo','count_visible_invoices':len(invoices)}
+    total_time=round((time.perf_counter()-t_start)*1000,1)
+    return {
+        'answer': answer,
+        'mode': mode,
+        'kind': kind,
+        'fallback_reason': fallback_reason,
+        'gemini_connected': gemini_connected,
+        'conversation_id': conversation.id,
+        'count_visible_invoices': facts.get('invoice_count'),
+        'model': gemini_chat.active_model_name(),
+        'web_sources': web_sources if kind == 'ordinary' else [],
+        'db_time_ms': db_time,
+        'llm_time_ms': llm_time,
+        'total_time_ms': total_time,
+    }
+
+@contextmanager
+def get_chat_db():
+    override = app.dependency_overrides.get(db_session)
+    if override:
+        gen = override()
+        try:
+            yield next(gen)
+        finally:
+            try:
+                next(gen)
+            except StopIteration:
+                pass
+    else:
+        with SessionLocal() as db:
+            yield db
+
+@app.post('/api/v1/chatbot/stream')
+async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user)):
+    """Streaming response via Server-Sent Events with stop generation and TTFT measurement."""
+    t_start=time.perf_counter()
+    image_bytes, mime_type = parse_image_data(body.image_base64)
+    effective_question = body.question.strip()
+    if not effective_question and image_bytes:
+        effective_question = 'Hãy đọc, nhận diện và phân tích chi tiết hình ảnh này.'
+    elif not effective_question and not image_bytes:
+        async def err_gen():
+            yield f"event: error\ndata: {json.dumps({'error':'Vui lòng nhập câu hỏi hoặc đính kèm hình ảnh'},ensure_ascii=False)}\n\n"
+        return StreamingResponse(err_gen(), media_type='text/event-stream')
+
+    async def event_generator():
+        t0=time.perf_counter()
+        db_time=0.0
+        with get_chat_db() as db:
+            conversation=db.get(Conversation,body.conversation_id) if body.conversation_id else None
+            if body.conversation_id and (not conversation or conversation.user_id!=user.id):
+                yield f"event: error\ndata: {json.dumps({'error':'Cuộc trò chuyện không tồn tại hoặc bạn không có quyền'})}\n\n"
+                return
+            if not conversation:
+                conversation=Conversation(user_id=user.id,title=effective_question[:100])
+                db.add(conversation);db.commit();db.refresh(conversation)
+            conv_id=conversation.id
+            history=list(reversed(db.scalars(select(ChatMessage.content).where(
+                ChatMessage.conversation_id==conv_id,ChatMessage.role=='user'
+            ).order_by(desc(ChatMessage.id)).limit(12)).all()))
+            recent_msgs=db.scalars(select(ChatMessage).where(
+                ChatMessage.conversation_id==conv_id
+            ).order_by(desc(ChatMessage.id)).limit(8)).all()
+            chat_history=[]
+            for m in reversed(recent_msgs):
+                t = m.content
+                if t.startswith(IMAGE_PREFIX):
+                    idx = t.find("]\n")
+                    if idx != -1: t = t[idx+2:]
+                chat_history.append({'role':m.role,'content':t})
+            previous_plan=None
+            for old_q in history:
+                t = old_q
+                if t.startswith(IMAGE_PREFIX):
+                    idx = t.find("]\n")
+                    if idx != -1: t = t[idx+2:]
+                previous_plan=chatbot_queries.parse_plan(t,role=user.role,previous_context=previous_plan)
+            classification=chatbot_queries.classify_chat_question(effective_question,role=user.role,previous_context=previous_plan)
+            kind=classification['kind']
+            if image_bytes and kind != 'security':
+                kind = 'ordinary'
+            plan=classification.get('plan') or chatbot_queries.parse_plan(effective_question,role=user.role,previous_context=previous_plan)
+
+            facts={};display_labels={};full_chunks=[]
+            ttft_ms=None
+
+            if kind=='security':
+                answer=SECURITY_REFUSAL
+                yield f"event: meta\ndata: {json.dumps({'conversation_id':conv_id,'kind':'security','model':gemini_chat.active_model_name(),'db_time_ms':0},ensure_ascii=False)}\n\n"
+                yield f"event: delta\ndata: {json.dumps({'text':answer},ensure_ascii=False)}\n\n"
+                ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                tot=round((time.perf_counter()-t0)*1000,1)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'security','ttft_ms':ttft_ms,'llm_time_ms':0,'total_time_ms':tot},ensure_ascii=False)}\n\n"
+                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
+                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=answer)])
+                db.commit()
+                return
+
+            if kind=='ordinary' or image_bytes:
+                yield f"event: meta\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','model':gemini_chat.active_model_name(),'db_time_ms':0},ensure_ascii=False)}\n\n"
+                t_llm0=time.perf_counter()
+                web_sources = []
+                try:
+                    import inspect
+                    gen_params = inspect.signature(gemini_chat.stream_general).parameters
+                    gen_kwargs: dict[str, Any] = {}
+                    if 'history' in gen_params: gen_kwargs['history'] = chat_history
+                    if 'image_bytes' in gen_params and image_bytes: gen_kwargs['image_bytes'] = image_bytes
+                    if 'mime_type' in gen_params and image_bytes: gen_kwargs['mime_type'] = mime_type
+                    if 'sources_collector' in gen_params: gen_kwargs['sources_collector'] = web_sources
+                    async for fragment in gemini_chat.stream_general(effective_question, **gen_kwargs):
+                        if await request.is_disconnected():
+                            break
+                        if ttft_ms is None:
+                            ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                        full_chunks.append(fragment)
+                        yield f"event: delta\ndata: {json.dumps({'text':fragment},ensure_ascii=False)}\n\n"
+                except gemini_chat.GeminiUnavailable as exc:
+                    err_text=gemini_chat.friendly_error(exc.code)
+                    full_chunks.append(err_text)
+                    if ttft_ms is None: ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                    yield f"event: delta\ndata: {json.dumps({'text':err_text},ensure_ascii=False)}\n\n"
+
+                final_answer=''.join(full_chunks)
+                t_end=time.perf_counter()
+                llm_time=round((t_end-t_llm0)*1000,1)
+                tot=round((t_end-t0)*1000,1)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','ttft_ms':ttft_ms or tot,'llm_time_ms':llm_time,'total_time_ms':tot,'model':gemini_chat.active_model_name(),'web_sources':web_sources},ensure_ascii=False)}\n\n"
+                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
+                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=final_answer)])
+                db.commit()
+                return
+
+            # Business or Analysis
+            t_db0=time.perf_counter()
+            queried=chatbot_queries.query_aggregates(db,user,plan,invoice_q(db,user))
+            db_time=round((time.perf_counter()-t_db0)*1000,1)
+            facts=queried['facts'];display_labels=queried['labels']
+            metric=plan.get('metric');domain=plan.get('domain')
+            no_data=(domain=='unsupported' or facts.get('denied')
+                     or metric=='amount' and 'formatted_vnd' not in facts
+                     or metric=='count' and facts.get('invoice_count')==0
+                     or metric=='status_distribution' and not facts.get('rows')
+                     or plan.get('group_by') and not facts.get('rows')
+                     or metric=='schedule_stats' and not (facts.get('schedule_count') or facts.get('rows'))
+                     or metric=='summary' and domain=='invoice' and facts.get('invoice_count')==0)
+            yield f"event: meta\ndata: {json.dumps({'conversation_id':conv_id,'kind':kind,'model':gemini_chat.active_model_name(),'db_time_ms':db_time,'count_visible_invoices':facts.get('invoice_count')},ensure_ascii=False)}\n\n"
+
+            if plan.get('format')=='table' or no_data:
+                fallback_text=chatbot_queries.render_fallback(plan,facts,display_labels)
+                ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                yield f"event: delta\ndata: {json.dumps({'text':fallback_text},ensure_ascii=False)}\n\n"
+                tot=round((time.perf_counter()-t0)*1000,1)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':kind,'ttft_ms':ttft_ms,'db_time_ms':db_time,'llm_time_ms':0,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
+                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
+                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=fallback_text)])
+                db.commit()
+                return
+
+            safe_previous={k:previous_plan.get(k) for k in ('domain','metric','group_by','period','scope','format','status_filter')} if plan.get('contextual') and previous_plan else None
+            t_llm0=time.perf_counter()
+            try:
+                async for fragment in gemini_chat.stream_analysis(plan,facts,safe_previous):
+                    if await request.is_disconnected():
+                        break
+                    if ttft_ms is None:
+                        ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                    fragment_display=chatbot_queries.apply_display_labels(fragment,display_labels)
+                    full_chunks.append(fragment_display)
+                    yield f"event: delta\ndata: {json.dumps({'text':fragment_display},ensure_ascii=False)}\n\n"
+            except gemini_chat.GeminiUnavailable as exc:
+                fallback_text='Đang sử dụng chế độ dự phòng (số liệu truy vấn từ backend). '+chatbot_queries.render_fallback(plan,facts,display_labels)
+                full_chunks.append(fallback_text)
+                if ttft_ms is None: ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                yield f"event: delta\ndata: {json.dumps({'text':fallback_text},ensure_ascii=False)}\n\n"
+
+            final_answer=''.join(full_chunks)
+            if plan.get('format')=='list' and not re.search(r'(?m)^\s*[-*•]\s+',final_answer):
+                final_answer=chatbot_queries.render_fallback(plan,facts,display_labels)
+            t_end=time.perf_counter()
+            llm_time=round((t_end-t_llm0)*1000,1)
+            tot=round((t_end-t0)*1000,1)
+            yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':kind,'ttft_ms':ttft_ms or tot,'db_time_ms':db_time,'llm_time_ms':llm_time,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
+            user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
+            db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=final_answer)])
+            db.commit()
+
+    return StreamingResponse(event_generator(),media_type='text/event-stream',headers={
+        'Cache-Control':'no-cache','X-Accel-Buffering':'no','Connection':'keep-alive'
+    })
+
+@app.get('/api/v1/chatbot/status')
+def chatbot_status(user=Depends(current_user)):
+    return gemini_chat.health_check()
+
+@app.get('/api/v1/chatbot/conversations')
+def get_conversations(db:Session=Depends(db_session),user=Depends(current_user)):
+    rows=db.scalars(select(Conversation).where(Conversation.user_id==user.id).order_by(desc(Conversation.id)).limit(50)).all()
+    res=[]
+    for c in rows:
+        last_msg=db.scalar(select(ChatMessage.content).where(ChatMessage.conversation_id==c.id,ChatMessage.role=='user').order_by(ChatMessage.id.asc()).limit(1))
+        preview=''
+        if last_msg:
+            if last_msg.startswith(IMAGE_PREFIX):
+                idx=last_msg.find("]\n")
+                if idx!=-1:
+                    last_msg='[Hình ảnh] '+last_msg[idx+2:]
+            preview=(last_msg[:60]+'...') if len(last_msg)>60 else last_msg
+        res.append({
+            'id':c.id,
+            'title':c.title or 'Cuộc trò chuyện mới',
+            'created_at':c.created_at.isoformat() if c.created_at else None,
+            'preview':preview
+        })
+    return res
+
+@app.get('/api/v1/chatbot/conversations/{conv_id}')
+def get_conversation_detail(conv_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    c=db.get(Conversation,conv_id)
+    if not c or c.user_id!=user.id:
+        fail('Không tìm thấy cuộc trò chuyện',404)
+    msgs=db.scalars(select(ChatMessage).where(ChatMessage.conversation_id==c.id).order_by(ChatMessage.id.asc())).all()
+    res_msgs=[]
+    for m in msgs:
+        img=None
+        text=m.content
+        if text.startswith(IMAGE_PREFIX):
+            idx=text.find("]\n")
+            if idx!=-1:
+                img=text[len(IMAGE_PREFIX):idx]
+                text=text[idx+2:]
+        res_msgs.append({'id':m.id,'role':m.role,'content':text,'image':img})
+    return {
+        'id':c.id,
+        'title':c.title or 'Cuộc trò chuyện mới',
+        'created_at':c.created_at.isoformat() if c.created_at else None,
+        'messages':res_msgs
+    }
+
+@app.delete('/api/v1/chatbot/conversations/{conv_id}')
+def delete_conversation(conv_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
+    c=db.get(Conversation,conv_id)
+    if not c or c.user_id!=user.id:
+        fail('Không tìm thấy cuộc trò chuyện',404)
+    chat_msgs=db.scalars(select(ChatMessage).where(ChatMessage.conversation_id==c.id)).all()
+    for cm in chat_msgs:
+        db.delete(cm)
+    db.delete(c)
+    db.commit()
+    return {'status':'deleted'}

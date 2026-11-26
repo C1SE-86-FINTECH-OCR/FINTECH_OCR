@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowRight, Camera, CheckCircle2, CloudUpload, FileText, RefreshCw,
-  RotateCcw, Upload, XCircle,
+  AlertTriangle, ArrowRight, CheckCircle2, CircleHelp, CloudUpload, FileText, LoaderCircle,
+  Minus, RefreshCw, RotateCcw, ScanText, ShieldCheck, Sparkles, XCircle,
 } from 'lucide-react';
 import { api, approvalName, authStore, datefmt, money, ROOT } from './api';
-import { invoiceStatusCounts, invoicesForApprovalStatus, UPLOAD_QUEUE_STAGES, uploadQueueStageState, validateInvoiceFile } from './uploadUtils';
+import { invoiceStatusCounts, invoicesForApprovalStatus, isInvoiceUploadResult, UPLOAD_QUEUE_STAGES, uploadExtractionFailed, uploadQueueStageState, validateInvoiceFile } from './uploadUtils';
 import './UploadPage.css';
+import { aiProcessingState, invoiceProcessingState } from './ocrRuntimeInfo';
 
 const statusLabel = value => ({
   valid: 'Hợp lệ', needs_review: 'Cần kiểm tra', error: 'Lỗi',
@@ -50,6 +51,9 @@ function uploadInvoiceFile(file, { onProgress, onUploaded }) {
       const error = new Error(message);
       error.status = xhr.status;
       error.uploadFinished = uploadFinished;
+      // Receiving 4xx rejection is different from losing a processing response.
+      const rejected = [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(xhr.status);
+      error.failurePhase = rejected ? 'transfer' : (uploadFinished || xhr.status >= 200 ? 'processing' : 'transfer');
       error.retryable = xhr.status === 429;
       return error;
     };
@@ -69,60 +73,95 @@ function uploadInvoiceFile(file, { onProgress, onUploaded }) {
     xhr.addEventListener('load', () => {
       let payload;
       try { payload = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
-      catch { payload = {}; }
-      if (xhr.status >= 200 && xhr.status < 300) return resolve(payload);
-      const detail = typeof payload.detail === 'string' ? payload.detail : `HTTP ${xhr.status}`;
+      catch { payload = null; }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (!isInvoiceUploadResult(payload)) {
+          return reject(makeError('Phản hồi xử lý không hợp lệ. Kiểm tra danh sách hóa đơn trước khi tải lại.'));
+        }
+        return resolve(payload);
+      }
+      const detail = typeof payload?.detail === 'string' ? payload.detail : `HTTP ${xhr.status}`;
       reject(makeError(detail));
     });
     xhr.addEventListener('error', () => reject(makeError('Mất kết nối trong lúc tải lên. Hãy kiểm tra Danh sách hóa đơn trước khi thử lại.')));
     xhr.addEventListener('timeout', () => reject(makeError('Hết thời gian chờ phản hồi. Hãy kiểm tra Danh sách hóa đơn trước khi thử lại.')));
+    xhr.addEventListener('abort', () => reject(makeError('Đã ngắt kết nối tải lên. Kiểm tra danh sách hóa đơn trước khi tải lại.')));
     xhr.send(form);
   });
 }
 
+const queueStageIcons = { upload: CloudUpload, ocr: ScanText, ai: Sparkles, validation: ShieldCheck, done: CheckCircle2 };
+
+function UploadQueueStepper({ item }) {
+  return <ol className="queue-stepper" aria-label="Các bước xử lý tệp">
+    {UPLOAD_QUEUE_STAGES.map(stage => {
+      const state = uploadQueueStageState(item, stage.id);
+      const warning = state === 'review' || (stage.id === 'ai' && state === 'failed');
+      const Icon = state === 'complete' ? CheckCircle2 : state === 'active' ? LoaderCircle
+        : warning ? AlertTriangle : state === 'failed' ? XCircle : state === 'unavailable' ? Minus
+          : state === 'unknown' ? CircleHelp : queueStageIcons[stage.id];
+      const description = state === 'complete' ? (stage.id === 'done' ? 'Đã kết thúc' : 'Xong')
+        : state === 'active' ? 'Đang tải lên' : state === 'review' ? 'Cần kiểm tra'
+          : state === 'failed' ? (stage.id === 'ai' ? 'Không khả dụng' : 'Thất bại')
+            : state === 'unavailable' ? 'Bỏ qua' : state === 'unknown' ? 'Chưa xác định' : 'Chờ kết quả';
+      return <li key={stage.id} className={`queue-step state-${warning ? 'review' : state}`}
+        aria-current={state === 'active' ? 'step' : undefined}
+        title={stage.id === 'done' ? `${description} · Hoàn tất xử lý không có nghĩa là đã xác minh hóa đơn.` : `${stage.label}: ${description}`}>
+        <span className="queue-step-icon"><Icon size={15} className={state === 'active' ? 'queue-spinner' : undefined} aria-hidden="true"/></span>
+        <span className="queue-step-label">{stage.label}</span>
+        <small>{description}</small>
+      </li>;
+    })}
+  </ol>;
+}
+
 function UploadQueueItem({ item, onRetry, onReview }) {
   const active = item.status === 'uploading';
-  const completed = item.status === 'done';
-  const stages = UPLOAD_QUEUE_STAGES.map(stage => ({
-    ...stage,
-    state: uploadQueueStageState(item, stage.id),
-  }));
+  const outcome = item.status === 'failed' ? { label: 'Xử lý thất bại', tone: 'red' }
+    : active ? { label: 'Đang xử lý', tone: 'blue' }
+      : item.status === 'done' ? invoiceProcessingState(item.invoice) : { label: 'Sẵn sàng tải lên', tone: 'gray' };
+  const ai = aiProcessingState(item.invoice?.ocr);
+  const Icon = outcome.tone === 'red' ? XCircle : outcome.tone === 'orange' ? AlertTriangle
+    : outcome.tone === 'green' ? CheckCircle2 : FileText;
   const measuredProgress = active && item.phase === 'transfer' && Number.isFinite(item.progress);
-  return <li className={`upload-queue-item queue-${item.status}`}>
-    <div className="queue-file-icon">{completed ? <CheckCircle2 size={19}/> : item.status === 'failed' ? <XCircle size={19}/> : <FileText size={19}/>}</div>
+  const fileIssue = validateInvoiceFile(item.file);
+  const localResult = item.invoice?.id != null && !uploadExtractionFailed(item.invoice)
+    && item.invoice?.validation_status !== 'error';
+  const localMethod = item.invoice?.source_type === 'xml' || /\.xml$/i.test(item.file.name) ? 'kết quả XML tại máy' : 'OCR dự phòng';
+  const deferred = item.invoice?.ocr?.llm?.status === 'deferred';
+  const warning = fileIssue || (deferred && localResult ? 'AI tạm hoãn · Đã sử dụng kết quả tại máy' : '')
+    || (ai?.fallback ? (item.invoice?.ocr?.llm?.status === 'failed' && localResult && localMethod === 'OCR dự phòng'
+    ? 'AI tạm thời không khả dụng · Đã sử dụng OCR dự phòng'
+    : `${ai.label}${localResult ? ` · Đã sử dụng ${localMethod}` : ''}`) : '')
+    || (item.status === 'failed' ? 'Không thể hoàn tất xử lý. Mở Chi tiết để xem lỗi.' : '');
+  return <li className={`upload-queue-item queue-tone-${outcome.tone}`}>
+    <div className="queue-file-icon"><Icon size={21} aria-hidden="true"/></div>
     <div className="queue-file-main">
       <div className="queue-file-heading">
         <strong title={item.file.name}>{item.file.name}</strong>
         <small>{formatBytes(item.file.size)}</small>
       </div>
-      <div className="queue-status-line">
-        <StatusBadge value={item.status} label={item.status === 'done' ? 'Hoàn tất' : item.status === 'failed' ? 'Thất bại' : item.status === 'uploading' ? item.phase === 'transfer' ? 'Đang tải lên' : 'Đang xử lý' : 'Sẵn sàng'}/>
-        {item.invoice?.id && <span>Hóa đơn #{item.invoice.id}</span>}
+      <div className="queue-status-line" role="status">
+        {active && <LoaderCircle size={13} className="queue-spinner" aria-hidden="true"/>}
+        <span className={`pill pill-${outcome.tone}`}>{outcome.label}</span>
       </div>
-      {active && <div className="queue-progress-wrap">
-        {measuredProgress
-          ? <div className="upload-progress-track" role="progressbar" aria-label={`Đã tải ${item.progress}% của ${item.file.name}`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={item.progress}><span style={{ width: `${item.progress}%` }}/></div>
-          : <div className="upload-progress-track is-indeterminate" role="progressbar" aria-label={`Đang xử lý ${item.file.name}`}><span/></div>}
-        {measuredProgress && <small>{item.progress}% đã tải lên</small>}
-        {item.phase === 'processing' && <p className="queue-hint">Tệp đã gửi xong; Backend đang xử lý đồng bộ. API không báo tiến độ riêng cho OCR/Validation.</p>}
-      </div>}
-      {item.error && <p className="queue-error" role="alert">{item.error}</p>}
-      {item.status === 'failed' && !item.retryable && <p className="queue-hint">Hãy kiểm tra Danh sách hóa đơn trước khi gửi lại. Máy chủ có thể đã nhận được tệp.</p>}
-      {completed && <p className="queue-result">API đã lưu hóa đơn #{item.invoice?.id}; trạng thái kiểm tra:<strong>{statusLabel(item.invoice?.validation_status)}</strong>.</p>}
-      {item.status === 'failed' && item.invoice?.id && <p className="queue-result">Hóa đơn #{item.invoice.id} đã được lưu nhưng API báo lỗi kiểm tra. Hãy xem lại hóa đơn; tệp sẽ không được gửi lại để tránh trùng lặp.</p>}
-      <ol className="queue-stepper" aria-label={`Các bước xử lý của tệp ${item.file.name}`}>
-        {stages.map((stage, index) => <li key={stage.id} className={`queue-step step-${stage.state}`} aria-current={stage.state === 'active' ? 'step' : undefined}>
-          <span className="queue-step-marker">{stage.state === 'complete' ? <CheckCircle2 size={13}/> : stage.state === 'failed' ? <XCircle size={13}/> : index + 1}</span>
-          <span className="queue-step-label">{stage.label}</span>
-          {stage.state === 'unavailable' && <small>Chưa có dữ liệu</small>}
-        </li>)}
-      </ol>
-      {item.status !== 'done' && <p className="queue-ai-note">API hiện tại chưa cung cấp trạng thái trích xuất AI.</p>}
     </div>
     <div className="queue-actions">
       {item.status === 'failed' && item.retryable && <button type="button" className="btn btn-small btn-muted" onClick={() => onRetry(item.id)}><RotateCcw size={14}/>Thử lại</button>}
-      {completed && item.invoice?.id && <button type="button" className="textbtn" onClick={() => onReview(item.invoice.id)}>Xem chi tiết<ArrowRight size={14}/></button>}
+      {item.invoice?.id && <button type="button" className="textbtn" onClick={() => onReview(item.invoice.id)}>Xem chi tiết<ArrowRight size={14}/></button>}
     </div>
+    <UploadQueueStepper item={item}/>
+    {measuredProgress && <div className="queue-progress-wrap">
+      <div className="upload-progress-track" role="progressbar" aria-label={`Đã tải ${item.progress}% của ${item.file.name}`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={item.progress}><span style={{ width: `${item.progress}%` }}/></div>
+      <small>{item.progress}% đã tải lên</small>
+    </div>}
+    {warning && <p className={`queue-warning ${outcome.tone === 'red' ? 'is-error' : ''}`} role={outcome.tone === 'red' ? 'alert' : 'status'}>{warning}</p>}
+    {(item.error || item.invoice?.ocr || item.invoice?.warnings?.length > 0) && <details className="queue-diagnostics">
+      <summary>Chi tiết</summary>
+      {item.error && <p>{item.error}</p>}
+      {item.status === 'failed' && !fileIssue && !item.retryable && <p>Kiểm tra danh sách hóa đơn trước khi tải lại để tránh tạo bản trùng.</p>}
+      {item.invoice && <pre>{JSON.stringify({ ocr: item.invoice.ocr, warnings: item.invoice.warnings }, null, 2)}</pre>}
+    </details>}
   </li>;
 }
 
@@ -130,7 +169,7 @@ function MyInvoices({ invoices, busy, error, reload, onSubmit, submittingId, sub
   const counts = useMemo(() => invoiceStatusCounts(invoices), [invoices]);
   const rows = useMemo(() => invoicesForApprovalStatus(invoices, activeTab), [invoices, activeTab]);
   const tabs = [
-    ['all', 'Tất cả'], ['draft', 'Nháp'], ['pending', 'Chờ xử lý'], ['approved', 'Đã phê duyệt'], ['rejected', 'Đã từ chối'],
+    ['all', 'Tất cả'],['pending', 'Chờ xử lý'], ['approved', 'Đã phê duyệt'], ['rejected', 'Đã từ chối'],
   ];
   return <section className="panel upload-invoices-panel">
     <div className="upload-section-heading">
@@ -146,7 +185,7 @@ function MyInvoices({ invoices, busy, error, reload, onSubmit, submittingId, sub
       : error ? <div className="upload-table-state error" role="alert">{error}<button className="btn btn-small btn-muted" type="button" onClick={reload}>Thử lại</button></div>
       : rows.length === 0 ? <div className="upload-empty"><FileText size={30}/><strong>{invoices.length ? 'Không có hóa đơn ở trạng thái này' : 'Chưa có hóa đơn'}</strong><span>{invoices.length ? 'Chọn tab khác để xem hóa đơn.' : 'Tải hóa đơn đầu tiên lên để bắt đầu.'}</span></div>
       : <div className="upload-invoice-scroll"><table className="upload-invoice-table"><thead><tr>
-        <th>Số hóa đơn</th><th>Nhà cung cấp</th><th>Ngày</th><th>Số tiền</th><th>Loại</th><th>Kiểm tra AI</th><th>Phê duyệt</th><th>Thao tác</th>
+        <th>Số hóa đơn</th><th>Nhà cung cấp</th><th>Ngày</th><th>Số tiền</th><th>Loại</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Thao tác</th>
       </tr></thead><tbody>{rows.map(invoice => {
         const canSubmit = ['draft', 'rejected'].includes(invoice.approval_status);
         const reason = rejectionReason(invoice);
@@ -156,7 +195,7 @@ function MyInvoices({ invoices, busy, error, reload, onSubmit, submittingId, sub
           <td>{datefmt(invoice.invoice_date)}</td>
           <td className="money">{invoice.total_amount == null ? '—' : money(invoice.total_amount)}</td>
           <td><span className="type-label">{{ einvoice: 'Hóa đơn điện tử', bill: 'Chứng từ', unknown: 'Chưa xác định' }[invoice.document_type] || '—'}</span></td>
-          <td title="Đây là validation_status do Backend trả về; API hiện không có trạng thái AI riêng."><StatusBadge value={invoice.validation_status}/></td>
+          <td><StatusBadge value={invoice.validation_status} label={invoice.validation_status === 'valid' ? 'Đã kiểm tra dữ liệu' : statusLabel(invoice.validation_status)}/></td>
           <td><StatusBadge value={invoice.approval_status} label={approvalName(invoice.approval_status)}/></td>
           <td><div className="invoice-row-actions">
             <button type="button" className="btn btn-small btn-muted" onClick={() => navigate(`/invoices/${invoice.id}`)}>Chi tiết</button>
@@ -170,7 +209,9 @@ function MyInvoices({ invoices, busy, error, reload, onSubmit, submittingId, sub
 export default function UploadPage() {
   const navigate = useNavigate();
   const fileInput = useRef(null);
-  const cameraInput = useRef(null);
+  const dragDepth = useRef(0);
+  const uploadLock = useRef(false);
+  const invoiceRequest = useRef(0);
   const [queue, setQueue] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -182,19 +223,29 @@ export default function UploadPage() {
   const [submitErrors, setSubmitErrors] = useState({});
 
   const reloadInvoices = useCallback(async () => {
+    const request = ++invoiceRequest.current;
     setInvoicesBusy(true);
     setInvoicesError('');
     try {
       const rows = await api('/invoices');
-      setInvoiceData(Array.isArray(rows) ? rows : []);
+      if (request !== invoiceRequest.current) return;
+      if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object'
+          || Array.isArray(row) || !Number.isInteger(row.id) || row.id <= 0)) {
+        throw new Error('Phản hồi danh sách hóa đơn không hợp lệ.');
+      }
+      setInvoiceData(rows);
     } catch (error) {
+      if (request !== invoiceRequest.current) return;
       setInvoicesError(error.message || 'Không tải được danh sách hóa đơn.');
     } finally {
-      setInvoicesBusy(false);
+      if (request === invoiceRequest.current) setInvoicesBusy(false);
     }
   }, []);
 
-  useEffect(() => { void reloadInvoices(); }, [reloadInvoices]);
+  useEffect(() => {
+    void reloadInvoices();
+    return () => { invoiceRequest.current += 1; };
+  }, [reloadInvoices]);
 
   const addFiles = files => {
     const additions = Array.from(files || []).map(file => {
@@ -213,31 +264,46 @@ export default function UploadPage() {
         onProgress: progress => setQueue(current => current.map(entry => entry.id === id ? { ...entry, progress } : entry)),
         onUploaded: () => setQueue(current => current.map(entry => entry.id === id ? { ...entry, phase: 'processing', progress: 100 } : entry)),
       });
-      if (invoice.validation_status === 'error') {
-        setQueue(current => current.map(entry => entry.id === id ? { ...entry, status: 'failed', phase: 'processing', failurePhase: 'validation', invoice, error: 'API đã nhận tệp nhưng trả về trạng thái kiểm tra là lỗi.', retryable: false } : entry));
+      if (invoice.validation_status === 'error' || uploadExtractionFailed(invoice)) {
+        const extractionFailed = uploadExtractionFailed(invoice);
+        const storageFailed = invoice.ocr?.reason === 'storage_mapping_failed';
+        setQueue(current => current.map(entry => entry.id === id ? { ...entry, status: 'failed', phase: 'processing', failurePhase: extractionFailed ? 'ocr' : storageFailed ? 'processing' : 'validation', invoice, error: extractionFailed ? 'Đã nhận tệp nhưng trích xuất thất bại.' : storageFailed ? 'Chưa lưu được các trường trích xuất; tệp gốc và bằng chứng được giữ lại.' : 'Đã nhận tệp nhưng bước kiểm tra dữ liệu gặp lỗi.', retryable: false } : entry));
       } else {
         setQueue(current => current.map(entry => entry.id === id ? { ...entry, status: 'done', phase: 'complete', invoice, progress: 100 } : entry));
       }
       await reloadInvoices();
     } catch (error) {
-      setQueue(current => current.map(entry => entry.id === id ? { ...entry, status: 'failed', phase: error.uploadFinished ? 'processing' : 'transfer', failurePhase: error.uploadFinished ? 'processing' : 'transfer', error: error.message || "Tải lên thất bại.", retryable: Boolean(error.retryable), progress: error.uploadFinished ? 100 : entry.progress } : entry));
+      const failurePhase = error.failurePhase || (error.uploadFinished ? 'processing' : 'transfer');
+      setQueue(current => current.map(entry => entry.id === id ? { ...entry, status: 'failed', phase: failurePhase, failurePhase, error: error.message || "Tải lên thất bại.", retryable: Boolean(error.retryable), progress: error.uploadFinished ? 100 : entry.progress } : entry));
+      // A server-side commit may have succeeded even if its response was lost.
+      if (failurePhase === 'processing') await reloadInvoices();
     }
   };
 
   const uploadSelected = async () => {
-    if (uploading) return;
+    if (uploadLock.current) return;
     const pending = queue.filter(item => item.status === 'queued').map(item => item.id);
     if (!pending.length) return;
+    uploadLock.current = true;
     setUploading(true);
-    for (const id of pending) await sendFile(id);
-    setUploading(false);
+    try {
+      for (const id of pending) await sendFile(id);
+    } finally {
+      uploadLock.current = false;
+      setUploading(false);
+    }
   };
 
   const retryFile = async id => {
-    if (uploading) return;
+    if (uploadLock.current) return;
+    uploadLock.current = true;
     setUploading(true);
-    await sendFile(id);
-    setUploading(false);
+    try {
+      await sendFile(id);
+    } finally {
+      uploadLock.current = false;
+      setUploading(false);
+    }
   };
 
   const submitInvoice = async invoice => {
@@ -255,35 +321,56 @@ export default function UploadPage() {
 
   const activeCount = queue.filter(item => item.status === 'uploading').length;
   const readyCount = queue.filter(item => item.status === 'queued').length;
+  const reviewCount = queue.filter(item => item.status === 'done' && invoiceProcessingState(item.invoice).tone === 'orange').length;
   return <div className="employee-upload-page">
     <header className="pagehead upload-pagehead">
-      <div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>Tải hóa đơn lên</h1><p>Tải chứng từ lên và xem lại dữ liệu đã trích xuất.</p></div>
+      <div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>Tải hóa đơn lên</h1><p>Tải hóa đơn để tự động trích xuất thông tin.</p></div>
     </header>
 
     <div className="upload-top-grid">
       <section className="panel upload-card" aria-labelledby="upload-card-title">
-        <div className="upload-section-heading"><div><h2 id="upload-card-title">Thêm hóa đơn</h2><p>Chọn tệp hoặc kéo thả vào đây.</p></div><span className="upload-limit">Tối đa 20 MB / tệp</span></div>
-        <div className={`upload-dropzone ${isDragging ? 'is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); setIsDragging(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setIsDragging(false); }} onDrop={event => { event.preventDefault(); setIsDragging(false); addFiles(event.dataTransfer.files); }}>
-          <div className="upload-icon-box"><CloudUpload size={25}/></div>
-          <strong>Kéo thả tệp PDF, JPG, PNG hoặc XML</strong>
-          <span>Tối đa 20 MB mỗi tệp</span>
-          <input ref={fileInput} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" multiple className="visually-hidden-file" aria-label="Chọn tệp hóa đơn" onChange={event => { addFiles(event.target.files); event.target.value = ''; }}/>
-          <input ref={cameraInput} type="file" accept="image/*" capture="environment" className="visually-hidden-file" aria-label="Chụp ảnh hóa đơn" onChange={event => { addFiles(event.target.files); event.target.value = ''; }}/>
-          <div className="upload-choose-actions">
-            <button type="button" className="btn btn-primary" onClick={() => fileInput.current?.click()}><Upload size={16}/>Chọn tệp</button>
-            <button type="button" className="btn btn-muted" onClick={() => cameraInput.current?.click()}><Camera size={16}/>Chụp ảnh</button>
-          </div>
-          <small>PDF, JPG, JPEG, PNG hoặc XML · Tối đa 20 MB mỗi tệp</small>
-        </div>
-        {queue.some(item => item.status === 'queued') && <div className="upload-submit-row"><span>{queue.filter(item => item.status === 'queued').length} tệp sẵn sàng</span><button type="button" className="btn btn-primary" disabled={uploading} onClick={uploadSelected}>{uploading ? 'Đang tải lên…' : 'Tải các tệp đã chọn'}<ArrowRight size={16}/></button></div>}
-        {queue.some(item => item.status === 'failed') && <div className="upload-inline-note">Tệp lỗi định dạng hoặc vượt giới hạn chưa được gửi lên máy chủ.</div>}
+        <div className="upload-section-heading"><div><h2 id="upload-card-title">Thêm hóa đơn</h2><p>Chọn một hoặc nhiều tệp từ thiết bị.</p></div></div>
+        <button type="button" className={`upload-dropzone ${isDragging ? 'is-dragging' : ''}`}
+          aria-label={isDragging ? 'Thả tệp để tải lên' : 'Nhấn vào đây hoặc kéo thả hóa đơn'} aria-describedby="upload-file-formats"
+          onClick={() => fileInput.current?.click()}
+          onDragEnter={event => {
+            if (!Array.from(event.dataTransfer.types || []).includes('Files')) return;
+            event.preventDefault();
+            dragDepth.current += 1;
+            setIsDragging(true);
+          }}
+          onDragOver={event => {
+            if (!Array.from(event.dataTransfer.types || []).includes('Files')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDragLeave={() => {
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setIsDragging(false);
+          }}
+          onDrop={event => {
+            event.preventDefault();
+            dragDepth.current = 0;
+            setIsDragging(false);
+            addFiles(event.dataTransfer.files);
+          }}>
+          <span className="upload-icon-box"><CloudUpload size={68} strokeWidth={1.5} aria-hidden="true"/></span>
+          <strong aria-live="polite" aria-atomic="true">{isDragging ? 'Thả tệp để tải lên' : 'Nhấn vào đây hoặc kéo thả hóa đơn'}</strong>
+          <span id="upload-file-formats">PDF, JPG, PNG, XML · Tối đa 20 MB/tệp</span>
+        </button>
+        <input ref={fileInput} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" multiple tabIndex={-1} className="visually-hidden-file" aria-label="Chọn hóa đơn" onChange={event => { addFiles(event.target.files); event.target.value = ''; }}/>
+        {queue.some(item => item.status === 'queued') && <div className="upload-submit-row"><span>{readyCount} tệp đã chọn</span><button type="button" className="btn btn-primary" disabled={uploading} onClick={uploadSelected}>{uploading ? 'Đang tải lên…' : 'Tải hóa đơn lên'}<ArrowRight size={16}/></button></div>}
       </section>
 
       <section className="panel processing-card" aria-labelledby="processing-title">
-        <div className="upload-section-heading"><div><h2 id="processing-title">Hàng đợi xử lý</h2><p>Trạng thái tải lên và xử lý</p></div><span className="queue-count">{activeCount ? `${activeCount} tệp đang xử lý` : readyCount ? `${readyCount} tệp sẵn sàng` : `${queue.length} tệp`}</span></div>
-        {queue.length === 0 ? <div className="queue-empty"><FileText size={24}/><span>Hàng đợi chưa có tệp</span><small>Tệp được tải lên sẽ hiển thị tại đây.</small></div>
-          : <ul className="upload-queue-list">{queue.map(item => <UploadQueueItem key={item.id} item={item} onRetry={retryFile} onReview={id => navigate(`/invoices/${id}`)}/>)}</ul>}
-        {queue.length > 0 && <p className="queue-api-note">Phần trăm phản ánh dữ liệu trình duyệt đã tải lên thực tế. Tiến trình máy chủ không xác định vì API không cung cấp tiến độ từng bước; chưa có trạng thái Trích xuất AI.</p>}
+        <div className="upload-section-heading"><h2 id="processing-title">Hàng đợi xử lý</h2></div>
+        <dl className="queue-stats" aria-label="Thống kê hàng đợi" aria-live="polite" aria-atomic="true">
+          <div><dt>Tổng tệp</dt><dd>{queue.length}</dd></div>
+          <div className={activeCount ? 'has-active' : ''}><dt>Đang xử lý</dt><dd>{activeCount}</dd></div>
+          <div className={reviewCount ? 'has-review' : ''}><dt>Cần kiểm tra</dt><dd>{reviewCount}</dd></div>
+        </dl>
+        {queue.length === 0 ? <div className="queue-empty"><FileText size={18} aria-hidden="true"/><span>Hàng đợi chưa có tệp</span></div>
+          : <ul className={`upload-queue-list${queue.length > 1 ? ' has-multiple' : ''}`} tabIndex={queue.length > 1 ? 0 : undefined} aria-label="Danh sách tệp đang tải và đã xử lý">{queue.map(item => <UploadQueueItem key={item.id} item={item} onRetry={retryFile} onReview={id => navigate(`/invoices/${id}`)}/>)}</ul>}
       </section>
     </div>
 

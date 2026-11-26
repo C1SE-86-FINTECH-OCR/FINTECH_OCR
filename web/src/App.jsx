@@ -3,13 +3,14 @@ import InvoiceDateFilter from './InvoiceDateFilter.jsx';
 import {invoiceDateRange} from './invoiceDateFilter.js';
 import React,{createContext,useContext,useRef,useState,useEffect,useCallback} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
-import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,Pencil,UserRoundX,UserRoundCheck,Trash2} from 'lucide-react';
+import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,ScanText,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark,Globe} from 'lucide-react';
 import {api,authStore,money,datefmt,roleName,approvalName,documentTypeName,ROOT} from './api';
 import SpendingChart from './SpendingChart';
 import QuickInvoiceSearch from './QuickInvoiceSearch';
 import WorkspaceSearchPage from './WorkspaceSearchPage';
 import { matchesWorkspaceText } from './workspaceSearch';
 import EmployeeProfilePage from './EmployeeProfilePage';
+import ChatMarkdown from './ChatMarkdown.js';
 import InvoiceDetailPage from './InvoiceDetailPage';
 import './invoiceMessages.css';
 import UploadPage from './UploadPage';
@@ -64,7 +65,27 @@ const stateType=s=>({approved:'green',valid:'green',verified:'green',pending:'or
 function Status({value}){return <Pill type={stateType(value)}>{approvalName(value)||value}</Pill>}
 function Login({onLogin}){const[email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(false);
 async function submit(e){e.preventDefault();setLoading(true);setError('');try{let res=await api('/auth/login',{method:'POST',body:{email,password}});authStore.set(res.access_token);onLogin(res.user)}catch(e){setError(e.message)}finally{setLoading(false)}}
-return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><BrandLogo/></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1>Từ hóa đơn giấy<br/>đến{' '}<em>dữ liệu chuẩn xác.</em></h1><p>Số hóa. Kiểm tra. Phê duyệt.<br/>Mọi công cụ cần thiết cho nhóm, trong một không gian làm việc.</p></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
+return <div className="login-wrap"><div className="login-aside"><div className="brand brand-light"><BrandLogo/></div><div><p className="overline">KHÔNG GIAN QUẢN LÝ CHI TIÊU NỘI BỘ</p><h1 style={{fontSize:'clamp(38px, 3.8vw, 62px)',lineHeight:1.15,letterSpacing:'-0.035em',fontWeight:750}}>
+  Từ hóa đơn giấy<br/>đến{' '}<em>dữ liệu chuẩn xác.</em>
+</h1>
+<p>Số hóa hóa đơn. Chuẩn hóa dữ liệu. Tối ưu chi tiêu.<br/>Nền tảng quản lý tài chính thông minh dành cho doanh nghiệp.</p>
+<div style={{marginTop:28,padding:'22px 24px',background:'rgba(255,255,255,0.035)',border:'1px solid rgba(174,188,219,0.16)',borderRadius:18}}>
+  <div style={{color:'#aebcdb',fontSize:12,fontWeight:600,letterSpacing:'0.08em',marginBottom:24}}>QUY TRÌNH XỬ LÝ THÔNG MINH</div>
+  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8}}>
+    {[[FileUp,'Tải hóa đơn','Tiếp nhận chứng từ'],[ScanText,'AI trích xuất','Số hóa dữ liệu'],[ClipboardCheck,'Kiểm duyệt','Xác thực thông tin']].map(([Icon,label,description],index)=>(
+      <React.Fragment key={label}>
+        {index>0&&<ArrowRight aria-hidden="true" size={20} style={{color:'#778295',marginTop:19,flexShrink:0}}/>}
+        <div style={{flex:1,minWidth:0,textAlign:'center'}}>
+          <div style={{width:56,height:56,margin:'0 auto 12px',display:'grid',placeItems:'center',background:'rgba(174,188,219,0.08)',border:'1px solid rgba(174,188,219,0.18)',borderRadius:15,color:'#aebcdb'}}>
+            <Icon aria-hidden="true" size={26} strokeWidth={1.6}/>
+          </div>
+          <div style={{color:'#f1f3f5',fontSize:14,fontWeight:600}}>{label}</div>
+          <div style={{color:'#929aa8',fontSize:11,marginTop:6,lineHeight:1.5}}>{description}</div>
+        </div>
+      </React.Fragment>
+    ))}
+  </div>
+</div></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
 const messageNavItem=['/messages',"Tin nhắn",MessageSquare];
 const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
 function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
@@ -360,6 +381,7 @@ function HomePage({ user }) {
   const inv = useLoad('/invoices');
   const sched = useLoad('/schedules');
   const navigate = useNavigate();
+  const [chatPrompt, setChatPrompt] = useState('');
   const summary = data || {};
   const employee = user.role === 'employee';
   const stats = [
@@ -368,6 +390,16 @@ function HomePage({ user }) {
     ["Chờ phê duyệt", summary.pending, Clock3, 'pending'],
     ["Đã từ chối", summary.rejected, XCircle, 'rejected'],
   ];
+
+  function handleChatSubmit(e){
+    e.preventDefault();
+    const q=chatPrompt.trim();
+    if(q){
+      navigate('/chat',{state:{initialQuestion:q}});
+    }else{
+      navigate('/chat');
+    }
+  }
 
   return <>
     <Title
@@ -408,7 +440,29 @@ function HomePage({ user }) {
             {!sched.data?.length && <Empty label="Chưa có lịch công tác"/>}
           </div>
         </section>
-        <section className="panel black-panel"><MessageSquare size={21}/><h3>Trao đổi về hóa đơn</h3><p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p><button onClick={() => navigate('/chat')} className="black-input">Nhập câu hỏi...<ArrowRight size={18}/></button></section>
+        <section className="panel black-panel">
+          <MessageSquare size={21}/>
+          <h3>Trao đổi về hóa đơn</h3>
+          <p>Theo dõi phê duyệt, tìm chứng từ hoặc xem thông tin chi tiêu.</p>
+          <form className="black-input-form" onSubmit={handleChatSubmit}>
+            <input
+              type="text"
+              className="black-input-field"
+              placeholder="Nhập câu hỏi..."
+              value={chatPrompt}
+              onChange={e=>setChatPrompt(e.target.value)}
+              aria-label="Nhập câu hỏi cho trợ lý AI"
+            />
+            <button
+              type="submit"
+              className="black-input-submit"
+              title="Gửi câu hỏi đến Trợ lý AI"
+              aria-label="Gửi câu hỏi"
+            >
+              <ArrowRight size={18}/>
+            </button>
+          </form>
+        </section>
       </div>
     </>}
   </>;
@@ -672,7 +726,707 @@ function InvoiceMessagesPage({id,user}){
 }
 function SchedulePage({user}){return <EmployeeSchedulePage user={user}/>}
 function RankingPage(){const[params,setParams]=useSearchParams();const location=useLocation();const period=['all','month','quarter','year'].includes(params.get('period'))?params.get('period'):'all';const setPeriod=value=>setParams({period:value});const{data,busy,error}=useLoad('/ranking?period='+period);useEffect(()=>{if(!busy&&location.hash){document.getElementById(location.hash.slice(1))?.scrollIntoView({block:'center',behavior:'smooth'})}},[busy,data,location.hash]);return <><Title title="Xếp hạng công tác" description="Xếp hạng theo số chuyến công tác đã hoàn thành; không tính chuyến dự kiến hoặc đã hủy."/><section className="panel"><div className="filters"><h3>Bảng xếp hạng nhân viên</h3><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">Toàn thời gian</option><option value="month">Tháng này</option><option value="quarter">Quý này</option><option value="year">Năm nay</option></select></div>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="ranking">{(data||[]).map((r,i)=><div className="rankrow" id={'ranking-'+r.user_id} key={r.user_id}><span className="rank">#{i+1}</span><span className="avatar">{r.full_name.slice(-2).toUpperCase()}</span><strong>{r.full_name}</strong><span className="rank-score">{r.completed} chuyến hoàn thành</span></div>)}{!data?.length&&<Empty label="Chưa có chuyến công tác hoàn thành trong kỳ"/>}</div>}</section></>}
-function ChatPage(){const[question,setQuestion]=useState(''),[messages,setMessages]=useState([{role:'assistant',content:'Xin chào! Tôi đang dùng chế độ truy vấn dữ liệu demo, chưa kết nối LLM. Bạn có thể hỏi: Tổng tiền hóa đơn là bao nhiêu?'}]),[sending,setSending]=useState(false);async function submit(e){e.preventDefault();if(!question.trim())return;const q=question;setQuestion('');setMessages(x=>[...x,{role:'user',content:q}]);setSending(true);try{let r=await api('/chatbot/ask',{method:'POST',body:{question:q}});setMessages(x=>[...x,{role:'assistant',content:r.answer}])}catch(e){setMessages(x=>[...x,{role:'assistant',content:e.message}])}finally{setSending(false)}}return <><Title title="Trò chuyện với AI" description="Đặt câu hỏi về dữ liệu hóa đơn trong phạm vi quyền truy cập của bạn."/><section className="panel chat-panel"><div className="chat-heading"><span className="chat-bot">◈</span><div><strong>Trợ lý dữ liệu FINTECH</strong><small>Bản thử nghiệm truy vấn dữ liệu theo quyền · chưa tích hợp LLM</small></div></div><div className="chat-messages">{messages.map((m,i)=><div className={'chat-message '+m.role} key={i}>{m.content}</div>)}{sending&&<Loading/>}</div><form className="chat-form" onSubmit={submit}><input placeholder="Hỏi về hóa đơn..." value={question} onChange={e=>setQuestion(e.target.value)}/><button className="btn btn-primary"><Send size={17}/></button></form></section></>}
+function compressImage(file,maxDimension=1280,quality=0.85){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=(e)=>{
+      const img=new window.Image();
+      img.onload=()=>{
+        let width=img.width;
+        let height=img.height;
+        if(width>maxDimension||height>maxDimension){
+          if(width>height){
+            height=Math.round((height*maxDimension)/width);
+            width=maxDimension;
+          }else{
+            width=Math.round((width*maxDimension)/height);
+            height=maxDimension;
+          }
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=width;
+        canvas.height=height;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,width,height);
+        const dataUrl=canvas.toDataURL('image/jpeg',quality);
+        resolve(dataUrl);
+      };
+      img.onerror=()=>reject(new Error('Không thể tải hình ảnh'));
+      img.src=e.target.result;
+    };
+    reader.onerror=()=>reject(new Error('Không thể đọc tệp hình ảnh'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function ChatPage({user}){
+  const location=useLocation();
+  const [params,setParams]=useSearchParams();
+  const lastSentInitRef=useRef('');
+  const [question,setQuestion]=useState('');
+  const [attachedImage,setAttachedImage]=useState(null);
+  const [messages,setMessages]=useState([]);
+  const [sending,setSending]=useState(false);
+  const [streamingText,setStreamingText]=useState('');
+  const [connection,setConnection]=useState(null);
+  const [conversationId,setConversationId]=useState(null);
+  const [activeTitle,setActiveTitle]=useState('Cuộc trò chuyện mới');
+  const [activeDate,setActiveDate]=useState('');
+  const [conversations,setConversations]=useState([]);
+  const [copiedIdx,setCopiedIdx]=useState(null);
+  const [feedback,setFeedback]=useState({});
+
+  const messagesContainerRef=useRef(null);
+  const messagesEnd=useRef(null);
+  const sendingRef=useRef(false);
+  const abortRef=useRef(null);
+  const fileInputRef=useRef(null);
+
+  const handleFileChange=async(e)=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    try{
+      const compressed=await compressImage(file);
+      setAttachedImage(compressed);
+    }catch(err){
+      console.error('Lỗi nén ảnh:',err);
+    }finally{
+      if(fileInputRef.current)fileInputRef.current.value='';
+    }
+  };
+
+  const handlePaste=async(e)=>{
+    const items=e.clipboardData?.items;
+    if(!items)return;
+    for(let i=0;i<items.length;i++){
+      if(items[i].type&&items[i].type.indexOf('image')!==-1){
+        const file=items[i].getAsFile();
+        if(file){
+          e.preventDefault();
+          try{
+            const compressed=await compressImage(file);
+            setAttachedImage(compressed);
+          }catch(err){
+            console.error('Lỗi dán ảnh:',err);
+          }
+          break;
+        }
+      }
+    }
+  };
+
+  const formatChatDate=useCallback((isoString)=>{
+    if(!isoString)return '';
+    try{
+      const d=new Date(isoString);
+      return d.toLocaleDateString('vi-VN',{day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+    }catch{return '';}
+  },[]);
+
+  const fetchConversations=useCallback(async()=>{
+    try{
+      const list=await api('/chatbot/conversations');
+      setConversations(list||[]);
+    }catch{}
+  },[]);
+
+  useEffect(()=>{
+    let alive=true;
+    api('/chatbot/status').then(s=>{if(alive)setConnection(s)}).catch(()=>{if(alive)setConnection({connected:false,state:'unavailable'})});
+    fetchConversations();
+    return()=>{alive=false};
+  },[fetchConversations]);
+
+  useEffect(()=>{
+    const el=messagesContainerRef.current;
+    if(el){
+      el.scrollTo({top:el.scrollHeight,behavior:'smooth'});
+    }
+  },[messages,sending,streamingText]);
+
+  function stopGenerating(){
+    if(abortRef.current){
+      abortRef.current.abort();
+      abortRef.current=null;
+    }
+  }
+
+  function startNewChat(){
+    if(sending)return;
+    setConversationId(null);
+    setActiveTitle('Cuộc trò chuyện mới');
+    setActiveDate('');
+    setMessages([]);
+    setQuestion('');
+    setAttachedImage(null);
+  }
+
+  async function selectConversation(conv){
+    if(sending||conv.id===conversationId)return;
+    try{
+      const detail=await api('/chatbot/conversations/'+conv.id);
+      setConversationId(detail.id);
+      setActiveTitle(detail.title||'Cuộc trò chuyện');
+      setActiveDate(detail.created_at?formatChatDate(detail.created_at):'');
+      setMessages(detail.messages.map(m=>({role:m.role,content:m.content,image:m.image||null})));
+    }catch{}
+  }
+
+  async function deleteConv(id,e){
+    e.stopPropagation();
+    try{
+      await api('/chatbot/conversations/'+id,{method:'DELETE'});
+      setConversations(prev=>prev.filter(c=>c.id!==id));
+      if(conversationId===id){
+        startNewChat();
+      }
+    }catch{}
+  }
+
+  function copyMessage(text,idx){
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(()=>setCopiedIdx(null),2000);
+  }
+
+  function toggleFeedback(idx,type){
+    setFeedback(prev=>({...prev,[idx]:prev[idx]===type?null:type}));
+  }
+
+  async function submitWithText(rawText){
+    const q=(rawText||'').trim();
+    if((!q&&!attachedImage)||sendingRef.current)return;
+    sendingRef.current=true;
+    const currentImg=attachedImage;
+    setAttachedImage(null);
+    setQuestion('');
+    setMessages(x=>[...x,{role:'user',content:q,image:currentImg}]);
+    setSending(true);
+    setStreamingText('');
+
+    if(!activeTitle||activeTitle==='Cuộc trò chuyện mới'){
+      setActiveTitle(q?q.slice(0,40):'Phân tích hình ảnh');
+      setActiveDate(formatChatDate(new Date().toISOString()));
+    }
+
+    const abortController=new AbortController();
+    abortRef.current=abortController;
+    let accumulatedText='';
+    let metaData=null;
+
+    try{
+      const token=authStore.get();
+      const body={question:q};
+      if(currentImg)body.image_base64=currentImg;
+      if(conversationId)body.conversation_id=conversationId;
+
+      const response=await fetch(ROOT+'/chatbot/stream',{
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          ...(token?{Authorization:`Bearer ${token}`}:{})
+        },
+        body:JSON.stringify(body),
+        signal:abortController.signal
+      });
+
+      if(!response.ok){
+        let errJson;
+        try{errJson=await response.json()}catch{}
+        const errMsg=errJson?.detail||`Lỗi kết nối (HTTP ${response.status})`;
+        throw new Error(errMsg);
+      }
+
+      const reader=response.body.getReader();
+      const decoder=new TextDecoder();
+      let buffer='';
+
+      while(true){
+        const {done,value}=await reader.read();
+        if(done)break;
+        buffer+=decoder.decode(value,{stream:true});
+        const parts=buffer.split('\n\n');
+        buffer=parts.pop();
+        for(const part of parts){
+          if(!part.trim())continue;
+          const lines=part.split('\n');
+          let eventType='message';
+          let dataStr='';
+          for(const line of lines){
+            if(line.startsWith('event:'))eventType=line.slice(6).trim();
+            else if(line.startsWith('data:'))dataStr=line.slice(5).trim();
+          }
+          if(!dataStr)continue;
+          try{
+            const data=JSON.parse(dataStr);
+            if(eventType==='meta'){
+              if(data.conversation_id)setConversationId(data.conversation_id);
+              if(data.model)setConnection(s=>({...s,connected:true,model:data.model,state:'connected'}));
+            }else if(eventType==='delta'){
+              if(data.text){
+                accumulatedText+=data.text;
+                setStreamingText(accumulatedText);
+              }
+            }else if(eventType==='done'){
+              metaData=data;
+              if(data.conversation_id)setConversationId(data.conversation_id);
+              if(data.model)setConnection(s=>({...s,connected:true,model:data.model,state:'connected'}));
+            }else if(eventType==='error'){
+              accumulatedText+=(accumulatedText?'\n\n':'')+(data.error||'Đã xảy ra lỗi.');
+              setStreamingText(accumulatedText);
+            }
+          }catch(parseErr){}
+        }
+      }
+
+      if(accumulatedText){
+        setMessages(x=>[...x,{role:'assistant',content:accumulatedText,meta:metaData}]);
+        fetchConversations();
+      }
+    }catch(err){
+      if(err.name==='AbortError'){
+        if(accumulatedText){
+          setMessages(x=>[...x,{role:'assistant',content:accumulatedText+' *(Đã dừng tạo câu trả lời)*',meta:metaData}]);
+          fetchConversations();
+        }
+      }else{
+        try{
+          const fallbackBody={question:q};
+          if(currentImg)fallbackBody.image_base64=currentImg;
+          if(conversationId)fallbackBody.conversation_id=conversationId;
+          const r=await api('/chatbot/ask',{method:'POST',body:fallbackBody});
+          if(r.conversation_id)setConversationId(r.conversation_id);
+          setMessages(x=>[...x,{role:'assistant',content:r.answer,meta:{total_time_ms:r.total_time_ms,ttft_ms:r.llm_time_ms,db_time_ms:r.db_time_ms,kind:r.kind}}]);
+          if(r.gemini_connected===true)setConnection({connected:true,state:'connected',model:r.model});
+          fetchConversations();
+        }catch(askErr){
+          setMessages(x=>[...x,{role:'assistant',content:err.message||'Đã xảy ra lỗi khi tạo phản hồi.'}]);
+          setConnection(s=>({...s,connected:false,state:'unavailable'}));
+        }
+      }
+    }finally{
+      sendingRef.current=false;
+      abortRef.current=null;
+      setStreamingText('');
+      setSending(false);
+    }
+  }
+
+  useEffect(()=>{
+    const initQ=(location.state?.initialQuestion||params.get('q')||'').trim();
+    if(initQ&&lastSentInitRef.current!==initQ){
+      lastSentInitRef.current=initQ;
+      if(location.state?.initialQuestion){
+        window.history.replaceState({},document.title);
+      }
+      if(params.get('q')){
+        setParams(p=>{
+          const next=new URLSearchParams(p);
+          next.delete('q');
+          return next;
+        },{replace:true});
+      }
+      submitWithText(initQ);
+    }
+  },[location.state,params]);
+
+  function submit(e){
+    e.preventDefault();
+    submitWithText(question);
+  }
+
+  const userInitials=((user?.full_name||'Bạn').trim().split(/\s+/).slice(-2).map(w=>w[0]).join('')||'U').toUpperCase();
+
+  function groupConvs(list){
+    const today=[],last7=[],older=[];
+    const now=new Date();
+    const startOfToday=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+    const sevenDaysAgo=startOfToday-7*86400000;
+    for(const c of list){
+      const t=c.created_at?new Date(c.created_at).getTime():0;
+      if(t>=startOfToday)today.push(c);
+      else if(t>=sevenDaysAgo)last7.push(c);
+      else older.push(c);
+    }
+    return {today,last7,older};
+  }
+
+  function extractSources(content){
+    if(!content)return [];
+    const matches=content.match(/\b(INV-[A-Za-z0-9_-]+)\b/g);
+    if(!matches)return [];
+    return Array.from(new Set(matches)).slice(0,3);
+  }
+
+  const {today,last7,older}=groupConvs(conversations);
+
+
+  const connectionLabel=!connection?'Đang kiểm tra kết nối Gemini…':connection.connected?`Gemini đã sẵn sàng · ${connection.model}`:connection.state==='not_configured'?'Chưa cấu hình Gemini':'Gemini tạm thời ngoại tuyến (sử dụng chế độ dữ liệu nội bộ)';
+
+  return <>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:20,margin:'12px 0 24px'}}>
+      <div>
+        <h1 style={{fontSize:27,fontWeight:800,marginBottom:4}}>Trò chuyện với AI</h1>
+        <p style={{margin:0,fontSize:13,color:'#777983'}}>Tìm kiếm hóa đơn, phân tích xu hướng hoặc theo dõi chi tiêu của bạn.</p>
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:700,color:'#3e8c54',background:'#e8f4eb',padding:'6px 14px',borderRadius:100}}>
+        <CheckCircle2 size={15}/> Đã kết nối với hóa đơn của bạn
+      </div>
+    </div>
+
+    <div className="chat-layout">
+      {/* Left Sidebar: Lịch sử trò chuyện */}
+      <aside className="chat-sidebar">
+        <button type="button" className="chat-new-btn" onClick={startNewChat} title="Tạo cuộc trò chuyện mới">
+          <Plus size={16}/> Cuộc trò chuyện mới
+        </button>
+
+        <div className="chat-history-scroll">
+          {conversations.length===0?(
+            <div style={{textAlign:'center',padding:'30px 10px',color:'#9ca3af',fontSize:12}}>
+              Chưa có lịch sử trò chuyện
+            </div>
+          ):(
+            <>
+              {today.length>0&&(
+                <div>
+                  <div className="chat-history-group-title">Hôm nay</div>
+                  {today.map(c=>(
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
+                      onClick={()=>selectConversation(c)}
+                    >
+                      <Bookmark size={15}/>
+                      <div className="chat-history-item-body">
+                        <span className="chat-history-item-title">{c.title}</span>
+                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
+                      </div>
+                      <span
+                        className="chat-history-del-btn"
+                        onClick={(e)=>deleteConv(c.id,e)}
+                        title="Xóa cuộc trò chuyện"
+                      >
+                        <Trash2 size={13}/>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {last7.length>0&&(
+                <div>
+                  <div className="chat-history-group-title">7 ngày trước</div>
+                  {last7.map(c=>(
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
+                      onClick={()=>selectConversation(c)}
+                    >
+                      <Bookmark size={15}/>
+                      <div className="chat-history-item-body">
+                        <span className="chat-history-item-title">{c.title}</span>
+                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
+                      </div>
+                      <span
+                        className="chat-history-del-btn"
+                        onClick={(e)=>deleteConv(c.id,e)}
+                        title="Xóa cuộc trò chuyện"
+                      >
+                        <Trash2 size={13}/>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {older.length>0&&(
+                <div>
+                  <div className="chat-history-group-title">Cũ hơn</div>
+                  {older.map(c=>(
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
+                      onClick={()=>selectConversation(c)}
+                    >
+                      <Bookmark size={15}/>
+                      <div className="chat-history-item-body">
+                        <span className="chat-history-item-title">{c.title}</span>
+                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
+                      </div>
+                      <span
+                        className="chat-history-del-btn"
+                        onClick={(e)=>deleteConv(c.id,e)}
+                        title="Xóa cuộc trò chuyện"
+                      >
+                        <Trash2 size={13}/>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="chat-sidebar-security">
+          <Lock size={15}/>
+          <span>Chỉ hóa đơn và lịch trình trong không gian làm việc của bạn được sử dụng để trả lời.</span>
+        </div>
+      </aside>
+
+      {/* Right Main Chat Panel */}
+      <section className="chat-main-panel">
+        <div className="chat-main-header">
+          <div className="chat-main-header-left">
+            <div className="chat-sparkle-badge">
+              <Sparkles size={18}/>
+            </div>
+            <div>
+              <h3 className="chat-main-header-title">{activeTitle}</h3>
+            </div>
+          </div>
+          {activeDate&&<span className="chat-main-header-time">{activeDate}</span>}
+        </div>
+
+        <div className="chat-messages-container" ref={messagesContainerRef}>
+          {messages.map((m,i)=>{
+            if(m.role==='user'){
+              return (
+                <div className="chat-row-user" key={i}>
+                  <div className="chat-bubble-user">
+                    {m.image&&(
+                      <div className="chat-user-img-box">
+                        <img src={m.image} alt="Ảnh đính kèm" onClick={()=>window.open(m.image,'_blank')} title="Nhấn để xem ảnh phóng to"/>
+                      </div>
+                    )}
+                    {m.content&&<div>{m.content}</div>}
+                  </div>
+                  <div className="chat-avatar-user" title={user?.full_name||'Bạn'}>{userInitials}</div>
+                </div>
+              );
+            }
+
+            const internalSources=extractSources(m.content);
+            const webSources=m.meta?.web_sources||[];
+            const hasInternalData=(m.meta&&m.meta.kind&&m.meta.kind!=='ordinary'&&(m.meta.db_time_ms>0||m.meta.count_visible_invoices!=null));
+            const isVerified=internalSources.length>0||webSources.length>0||hasInternalData;
+
+            return (
+              <div className="chat-row-assistant" key={i}>
+                <div className="chat-assistant-head">
+                  <Sparkles size={16} color="#2563eb"/>
+                  <span>Fintech AI</span>
+                  {isVerified&&(
+                    <span className="chat-source-verified-badge" title="Thông tin có căn cứ xác minh từ hệ thống hoặc nguồn tra cứu">
+                      Nguồn đã xác thực
+                    </span>
+                  )}
+                </div>
+
+                <div className="chat-assistant-body">
+                  <ChatMarkdown>{m.content}</ChatMarkdown>
+                </div>
+
+                {(internalSources.length>0||webSources.length>0)&&(
+                  <div className="chat-sources-row">
+                    <span className="chat-sources-label">
+                      {internalSources.length>0&&webSources.length>0
+                        ?'Nguồn tham khảo:'
+                        :internalSources.length>0
+                        ?'Nguồn nội bộ (Hóa đơn):'
+                        :'Nguồn kiểm chứng (Web):'}
+                    </span>
+                    {internalSources.map(s=>(
+                      <NavLink key={s} to="/invoices" className="chat-source-tag" title="Xem hóa đơn nội bộ">
+                        <FileText size={12}/> {s} <ExternalLink size={10}/>
+                      </NavLink>
+                    ))}
+                    {webSources.map((ws,wIdx)=>(
+                      <a
+                        key={wIdx}
+                        href={ws.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chat-source-tag chat-source-tag-web"
+                        title={ws.title||ws.url}
+                      >
+                        <Globe size={12}/> {ws.title?(ws.title.length>32?ws.title.slice(0,32)+'…':ws.title):'Nguồn web'} <ExternalLink size={10}/>
+                      </a>
+                    ))}
+                  </div>
+                )}
+
+                <div className="chat-assistant-footer">
+                  <div>
+                    {m.meta?(
+                      <span>
+                        ⚡ {(m.meta.total_time_ms/1000).toFixed(2)}s
+                        {m.meta.ttft_ms!=null&&` · Phản hồi đầu: ${(m.meta.ttft_ms/1000).toFixed(2)}s`}
+                        {m.meta.db_time_ms>0&&` · CSDL: ${m.meta.db_time_ms}ms`}
+                        {m.meta.kind&&` · ${m.meta.kind==='ordinary'?'Kiến thức phổ thông':m.meta.kind==='security'?'Từ chối bảo mật':m.meta.kind==='analysis'?'Phân tích':'Nghiệp vụ'}`}
+                      </span>
+                    ):(
+                      <span>Phạm vi: Dữ liệu được cấp quyền</span>
+                    )}
+                  </div>
+
+                  <div className="chat-action-buttons">
+                    <button
+                      type="button"
+                      className="chat-action-btn"
+                      onClick={()=>copyMessage(m.content,i)}
+                      title="Sao chép nội dung"
+                    >
+                      {copiedIdx===i?<><Check size={13} color="#16a34a"/> Đã sao chép</>:<><Copy size={13}/> Sao chép</>}
+                    </button>
+                    <button
+                      type="button"
+                      className={'chat-action-btn '+(feedback[i]==='up'?'active':'')}
+                      onClick={()=>toggleFeedback(i,'up')}
+                      title="Hữu ích"
+                    >
+                      <ThumbsUp size={13}/>
+                    </button>
+                    <button
+                      type="button"
+                      className={'chat-action-btn '+(feedback[i]==='down'?'active':'')}
+                      onClick={()=>toggleFeedback(i,'down')}
+                      title="Chưa chính xác"
+                    >
+                      <ThumbsDown size={13}/>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {sending&&(
+            streamingText?(
+              <div className="chat-row-assistant">
+                <div className="chat-assistant-head">
+                  <Sparkles size={16} color="#2563eb"/>
+                  <span>Fintech AI</span>
+                  <span className="chat-source-verified-badge">Nguồn đã xác thực</span>
+                </div>
+                <div className="chat-assistant-body">
+                  <ChatMarkdown>{streamingText}</ChatMarkdown>
+                </div>
+              </div>
+            ):(
+              <div className="chat-row-assistant" aria-live="polite">
+                <div className="chat-assistant-head">
+                  <Sparkles size={16} color="#2563eb"/>
+                  <span>Fintech AI</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8,color:'#71717a',fontStyle:'italic',fontSize:13}}>
+                  <RefreshCw size={14} className="spin"/> Đang suy nghĩ và phân tích dữ liệu...
+                </div>
+              </div>
+            )
+          )}
+
+
+          <div ref={messagesEnd}/>
+        </div>
+
+        <form className="chat-input-area" onSubmit={submit}>
+          <div className="chat-input-container">
+            {attachedImage&&(
+              <div className="chat-img-preview-container">
+                <div className="chat-img-preview-card">
+                  <img src={attachedImage} alt="Xem trước ảnh đính kèm"/>
+                  <button
+                    type="button"
+                    className="chat-img-remove-btn"
+                    onClick={()=>setAttachedImage(null)}
+                    title="Xóa ảnh"
+                  >
+                    <X size={12}/>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="chat-input-top-row">
+              <Sparkles size={18} className="chat-input-sparkle"/>
+              <textarea
+                className="chat-input-field"
+                aria-label="Nhập câu hỏi cho trợ lý AI"
+                rows={1}
+                placeholder="Hỏi về hóa đơn, chi tiêu hoặc đính kèm ảnh để phân tích…"
+                value={question}
+                onChange={e=>setQuestion(e.target.value)}
+                onPaste={handlePaste}
+                onKeyDown={e=>{
+                  if(e.key==='Enter'&&!e.shiftKey){
+                    e.preventDefault();
+                    if(!sending&&(question.trim()||attachedImage)){
+                      submitWithText(question);
+                    }
+                  }
+                }}
+                readOnly={sending}
+              />
+            </div>
+
+            <div className="chat-input-bottom-row">
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  style={{display:'none'}}
+                  onChange={handleFileChange}
+                />
+                <button
+                  type="button"
+                  className="chat-attach-btn"
+                  onClick={()=>fileInputRef.current?.click()}
+                  title="Đính kèm ảnh từ máy tính"
+                  disabled={sending}
+                >
+                  <Plus size={16}/>
+                </button>
+                <span style={{fontSize:12,color:'#9ca3af'}}>
+                  {attachedImage?'1 ảnh đính kèm':'Dán ảnh (Ctrl+V) hoặc nhấn + để tải ảnh'}
+                </span>
+              </div>
+
+              {sending?(
+                <button
+                  type="button"
+                  className="btn btn-secondary chat-stop-btn"
+                  style={{height:32,padding:'0 12px',borderRadius:10,fontSize:12}}
+                  onClick={stopGenerating}
+                  title="Dừng tạo câu trả lời"
+                >
+                  <Square size={13} fill="currentColor"/> Dừng
+                </button>
+              ):(
+                <button
+                  type="submit"
+                  className="chat-send-btn"
+                  disabled={!question.trim()&&!attachedImage}
+                  title="Gửi câu hỏi"
+                >
+                  <ArrowUp size={18}/>
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="chat-disclaimer">
+            AI có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng từ hóa đơn gốc.
+          </div>
+        </form>
+      </section>
+    </div>
+  </>;
+}
 function ReportsPage(){
  const navigate=useNavigate();
  const blank={approval_status:'',validation_status:'',document_type:'',search:'',invoice_date_from:'',invoice_date_to:'',seller_name:'',lookup_status:''};
@@ -723,7 +1477,7 @@ function UsersPage(){
  }
  async function perform(){if(saving||!confirm)return;if(confirm.action==='toggle'){await toggleAccount(confirm.user);return}setSaving(true);try{await api('/users/'+confirm.user.id,confirm.action==='delete'?{method:'DELETE'}:{method:'PATCH',body:{status:confirm.user.status==='active'?'disabled':'active'}});setConfirm(null);reload();setMessage(confirm.action==='delete'?'Đã xóa hoàn toàn tài khoản':'Đã cập nhật tài khoản')}catch(e){setMessage(e.message)}finally{setSaving(false)}}
  const active=(data||[]).filter(u=>u.status==='active').length;
- const permissions={employee:'Tải hóa đơn cá nhân, xem lịch công tác và trò chuyện với AI. Không có quyền phê duyệt hoặc quản lý người dùng.',accountant:'Kiểm tra hóa đơn, phê duyệt chi phí, quản lý lịch công tác và xem báo cáo.',admin:'Quản lý người dùng, phân quyền, hóa đơn và lịch sử kiểm toán.'};
+ const permissions={employee:'Tải hóa đơn cá nhân, xem và tự điều chỉnh lịch công tác của mình, trò chuyện với AI. Không có quyền phê duyệt hoặc quản lý người dùng.',accountant:'Kiểm tra hóa đơn, phê duyệt chi phí, xem lịch công tác và xem báo cáo.',admin:'Quản lý người dùng, phân quyền, phân và điều chỉnh lịch công tác, hóa đơn và lịch sử kiểm toán.'};
  const actionLabel=confirm?.action==='delete'?'Xóa tài khoản':confirm?.user.status==='active'?'Vô hiệu hóa tài khoản':'Kích hoạt lại tài khoản';
  return <div className="users-page"><Title title="Quản lý người dùng" description="Quản lý quyền truy cập, vai trò và trạng thái tài khoản. Lịch sử tài khoản được lưu giữ."/>
  <div className={'users-layout '+(!form?'form-closed':'')}><div className="users-main"><section className="panel users-table-panel"><div className="panel-heading"><h3>Danh sách người dùng <span className="users-count">{data?.length||0}</span></h3><small>{active} đang hoạt động · {(data?.length||0)-active} đã vô hiệu hóa</small></div><div className="filters users-filters"><label className="searchbox"><Search size={15}/><input aria-label="Tìm người dùng" placeholder="Tìm theo tên hoặc email" value={search} onChange={e=>setSearch(e.target.value)}/></label><select aria-label="Lọc vai trò" value={role} onChange={e=>setRole(e.target.value)}><option value="">Tất cả vai trò</option>{['employee','accountant','admin'].map(r=><option key={r} value={r}>{roleName(r)}</option>)}</select><button className="btn btn-primary" onClick={()=>edit(null)}><Plus size={15}/> Thêm người dùng</button></div>
@@ -979,7 +1733,7 @@ export default function App(){
       <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage user={user}/>:<Navigate to="/"/>}/>
       <Route path="/schedule" element={<SchedulePage user={user}/>}/>
       <Route path="/ranking" element={<RankingPage/>}/>
-      <Route path="/chat" element={<ChatPage/>}/>
+      <Route path="/chat" element={<ChatPage user={user}/>}/>
       <Route path="/reports" element={user.role!=='employee'?<ReportsPage/>:<Navigate to="/"/>}/>
       <Route path="/users" element={user.role==='admin'?<UsersPage/>:<Navigate to="/"/>}/>
       <Route path="/audit" element={user.role==='admin'?<AuditPage/>:<Navigate to="/"/>}/>

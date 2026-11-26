@@ -35,7 +35,11 @@ function getCalendarDays(anchor, view) {
 }
 
 export default function SchedulePage({ user }) {
-  const reviewer = ['admin', 'accountant'].includes(user.role);
+  const isAdmin = user.role === 'admin';
+  const isAccountant = user.role === 'accountant';
+  const isEmployee = user.role === 'employee';
+  const canCreate = isAdmin;
+  const canFilterEmployees = isAdmin;
   const [items, setItems] = useState([]), [employees, setEmployees] = useState([]);
   const [anchor, setAnchor] = useState(() => fromKey(dateKey(new Date()))), [view, setView] = useState('month');
   const [employeeFilter, setEmployeeFilter] = useState(''), [statusFilter, setStatusFilter] = useState('');
@@ -45,7 +49,8 @@ export default function SchedulePage({ user }) {
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const [datePickerOpen, setDatePickerOpen] = useState(false), [pickerAnchor, setPickerAnchor] = useState(() => fromKey(dateKey(new Date()))), [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
   const dateButtonRef = useRef(null), datePopupRef = useRef(null);
-  const activeEmployees = employees.filter(x => x.role === 'employee' && x.status === 'active');
+  const formatPersonLabel = p => p ? `${p.full_name}${p.role === 'accountant' ? ' (Kế toán)' : p.role === 'employee' ? ' (Nhân viên)' : ''}` : '';
+  const activeEmployees = employees.filter(x => (x.role === 'employee' || x.role === 'accountant') && x.status === 'active');
   const filterEmployees = useMemo(() => { const byId = new Map(activeEmployees.map(e => [String(e.id), e])); items.forEach(x => { if (!byId.has(String(x.assigned_to))) byId.set(String(x.assigned_to), { id: x.assigned_to, full_name: x.employee_name }); }); return [...byId.values()].sort((a, b) => a.full_name.localeCompare(b.full_name, 'vi')); }, [activeEmployees, items]);
 
   const load = useCallback(async () => {
@@ -57,12 +62,12 @@ export default function SchedulePage({ user }) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (!reviewer) return;
+    if (!canFilterEmployees) return;
     let live = true; setEmployeeBusy(true);
     api('/directory/employees').then(rows => { if (live) setEmployees(Array.isArray(rows) ? rows : []); })
       .catch(e => { if (live) setError(e.message); }).finally(() => { if (live) setEmployeeBusy(false); });
     return () => { live = false; };
-  }, [reviewer]);
+  }, [canFilterEmployees]);
 
   const filteredItems = useMemo(() => items.filter(item => (!employeeFilter || String(item.assigned_to) === employeeFilter) && (!statusFilter || statusKey(item.status) === statusFilter)), [items, employeeFilter, statusFilter]);
   const days = useMemo(() => getCalendarDays(anchor, view), [anchor, view]);
@@ -121,51 +126,64 @@ export default function SchedulePage({ user }) {
   function shiftPickerYear(amount) { setPickerAnchor(new Date(Date.UTC(pickerYear + amount, pickerMonth - 1, 1, 4))); }
   function openDatePicker() { setPickerAnchor(fromKey(selectedDate)); setDatePickerOpen(open => !open); }
   function openCreate(day = selectedDate) {
+    if (!canCreate) return;
     setSelectedDate(day); setSelectedId(null); setEditing(false); setError('');
-    setForm({ title: '', destination: '', startDay: day, endDay: day, startTime: '09:00', endTime: '11:00', assigned_to: activeEmployees[0]?.id ? String(activeEmployees[0].id) : '', notes: '' });
+    const defaultAssigned = isEmployee
+      ? String(user.id)
+      : (activeEmployees[0]?.id ? String(activeEmployees[0].id) : '');
+    setForm({ title: '', destination: '', startDay: day, endDay: day, startTime: '09:00', endTime: '11:00', assigned_to: defaultAssigned, notes: '' });
     setPanel('form');
   }
   function openEdit(item) {
+    if (!item) return;
+    const canEditItem = isAdmin || (isEmployee && Number(item.assigned_to) === Number(user.id));
+    if (!canEditItem) return;
     setSelectedId(item.id); setEditing(true); setError('');
     setForm({ title: item.title || '', destination: item.destination || '', startDay: item.start_date || dateKey(new Date(item.starts_at)), endDay: item.end_date || dateKey(new Date(item.ends_at)), startTime: timeValue(item.starts_at), endTime: timeValue(item.ends_at), assigned_to: String(item.assigned_to), notes: item.notes || '' });
     setPanel('form');
   }
-  function openDay(day) { const key = dateKey(day); setAnchor(fromKey(key)); setSelectedDate(key); setSelectedId(null); setPanel('day'); if (reviewer) openCreate(key); }
+  function openDay(day) { const key = dateKey(day); setAnchor(fromKey(key)); setSelectedDate(key); setSelectedId(null); setPanel('day'); }
 
   async function save(event) {
     event.preventDefault(); setError(''); setMessage('');
-    if (!form.title.trim() || !form.destination.trim() || !form.startDay || !form.endDay || !form.startTime || !form.endTime || !form.assigned_to) { setError('Vui lòng điền đầy đủ các trường bắt buộc.'); return; }
+    const assignedId = isEmployee ? Number(user.id) : Number(form.assigned_to);
+    if (!form.title.trim() || !form.destination.trim() || !form.startDay || !form.endDay || !form.startTime || !form.endTime || !assignedId) { setError('Vui lòng điền đầy đủ các trường bắt buộc.'); return; }
     const startsAt = vietnamDateTime(form.startDay, form.startTime), endsAt = vietnamDateTime(form.endDay, form.endTime);
     if (new Date(endsAt) <= new Date(startsAt)) { setError('Giờ kết thúc phải sau giờ bắt đầu.'); return; }
-    const body = { title: form.title.trim(), destination: form.destination.trim(), starts_at: startsAt, ends_at: endsAt, assigned_to: Number(form.assigned_to), notes: form.notes.trim() || null };
+    const body = { title: form.title.trim(), destination: form.destination.trim(), starts_at: startsAt, ends_at: endsAt, assigned_to: assignedId, notes: form.notes.trim() || null };
     setSaving(true);
     try {
       const result = await api(editing ? `/schedules/${selectedId}` : '/schedules', { method: editing ? 'PATCH' : 'POST', body });
       setItems(current => editing ? current.map(x => x.id === result.id ? result : x).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)) : [...current, result].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)));
-      const resultDay = dateKey(new Date(result.starts_at)); setSelectedDate(resultDay); setAnchor(fromKey(resultDay)); setSelectedId(result.id); setPanel('detail'); setMessage(editing ? 'Đã cập nhật lịch công tác.' : 'Đã phân công lịch công tác.');
+      const resultDay = dateKey(new Date(result.starts_at)); setSelectedDate(resultDay); setAnchor(fromKey(resultDay)); setSelectedId(result.id); setPanel('detail');
+      setMessage(editing ? 'Đã cập nhật lịch công tác.' : (isAdmin ? 'Đã phân công lịch công tác.' : 'Đã tạo lịch công tác của bạn.'));
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   }
 
   async function changeStatus(item, status) {
+    if (!item) return;
+    const canChange = isAdmin || (isEmployee && Number(item.assigned_to) === Number(user.id));
+    if (!canChange) { setError('Bạn không có quyền thay đổi trạng thái lịch này.'); return; }
     setError(''); setMessage('');
     try { const result = await api(`/schedules/${item.id}`, { method: 'PATCH', body: { status } }); setItems(current => current.map(x => x.id === result.id ? result : x)); setSelectedId(result.id); setPanel('detail'); setMessage(`Đã cập nhật trạng thái: ${STATUS_CONFIG[statusKey(result.status)].label}.`); }
     catch (e) { setError(e.message); }
   }
 
-  const pageTitle = user.role === 'admin' ? 'Quản lý lịch công tác' : user.role === 'accountant' ? 'Lịch công tác' : 'Lịch công tác của tôi';
+  const pageTitle = isAdmin ? 'Quản lý lịch công tác' : 'Lịch công tác của tôi';
+  const pageDescription = isAdmin ? 'Phân công, lập kế hoạch và điều chỉnh lịch công tác của nhân viên và kế toán.' : isAccountant ? 'Theo dõi lịch trình công tác của bạn (Kế toán chỉ xem).' : 'Theo dõi và tự điều chỉnh lịch công tác phù hợp của bạn.';
   const periodLabel = view === 'month' ? `Tháng ${Number(monthParts.month)} năm ${monthParts.year}` : `${shortDateLabel(days[0])} - ${shortDateLabel(days[6])}`;
 
   return <div className="schedule-page">
-    <header className="pagehead schedule-page-head"><div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>{pageTitle}</h1><p>{reviewer ? 'Lập kế hoạch công tác và theo dõi lịch trình của nhóm.' : 'Theo dõi các chuyến công tác được phân công cho bạn.'}</p></div>
-      {reviewer ? <button className="btn btn-primary" onClick={() => openCreate()}><Plus size={17}/>Tạo lịch công tác</button> : <span className="schedule-view-only"><Eye size={16}/>Chỉ xem</span>}
+    <header className="pagehead schedule-page-head"><div><small className="eyebrow">FINTECH OCR / KHÔNG GIAN LÀM VIỆC</small><h1>{pageTitle}</h1><p>{pageDescription}</p></div>
+      {isAdmin ? <button className="btn btn-primary" onClick={() => openCreate()}><Plus size={17}/>Phân công công tác</button> : isAccountant ? <span className="schedule-view-only"><Eye size={16}/>Kế toán chỉ xem</span> : null}
     </header>
 
     <div className="schedule-toolbar">
-      <div className="schedule-filters">{reviewer && <>
-        <label><Users size={16}/><select aria-label="Lọc theo nhân viên" value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}><option value="">Tất cả nhân viên</option>{filterEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>
+      <div className="schedule-filters">
+        {canFilterEmployees && <label><Users size={16}/><select aria-label="Lọc theo nhân viên" value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}><option value="">Tất cả người được phân công</option>{filterEmployees.map(e => <option key={e.id} value={e.id}>{formatPersonLabel(e)}</option>)}</select></label>}
         <label><CalendarDays size={16}/><select aria-label="Lọc theo trạng thái" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">Tất cả trạng thái</option>{STATUS_KEYS.map(key => <option key={key} value={key}>{STATUS_CONFIG[key].label}</option>)}</select></label>
-      </>}</div>
+      </div>
     </div>
 
     <div className="schedule-layout">
@@ -205,36 +223,45 @@ export default function SchedulePage({ user }) {
       </section>
 
       <aside className="panel schedule-side-panel">
-        {!panel && <div className="schedule-panel-empty"><CalendarDays size={28}/><h3>Lịch trình công tác</h3><p>{reviewer ? 'Chọn một ngày để tạo lịch hoặc chọn chuyến đi để xem chi tiết.' : 'Chọn chuyến công tác trên lịch để xem thông tin chi tiết.'}</p></div>}
+        {!panel && <div className="schedule-panel-empty"><CalendarDays size={28}/><h3>Lịch trình công tác</h3><p>{isAdmin ? 'Chọn một ngày để phân công hoặc chọn chuyến đi để xem chi tiết.' : isAccountant ? 'Chọn chuyến công tác trên lịch để theo dõi thông tin chi tiết.' : 'Chọn một ngày để tạo lịch hoặc chọn chuyến đi của bạn để xem và chỉnh sửa.'}</p></div>}
         {panel && <>
-          <div className="schedule-side-head"><div><small>{panel === 'form' ? (editing ? 'CẬP NHẬT LỊCH' : 'PHÂN CÔNG CÔNG TÁC') : panel === 'day' ? 'LỊCH TRONG NGÀY' : 'CHI TIẾT CHUYẾN ĐI'}</small><h2>{panel === 'form' ? (editing ? 'Chỉnh sửa lịch' : 'Tạo lịch công tác') : panel === 'day' ? dateLabel(fromKey(selectedDate), { day: 'numeric', month: 'long' }) : 'Chi tiết chuyến đi'}</h2></div><button className="iconbtn" aria-label="Đóng bảng chi tiết" onClick={() => setPanel('')}><X size={20}/></button></div>
-          {panel === 'form' && reviewer && <form className="schedule-form" onSubmit={save}>
-            <p>{editing ? 'Cập nhật thông tin chuyến công tác đã phân công.' : 'Thêm chuyến công tác vào lịch của nhân viên.'}</p>
+          <div className="schedule-side-head"><div><small>{panel === 'form' ? (editing ? 'CẬP NHẬT LỊCH' : (isAdmin ? 'PHÂN CÔNG CÔNG TÁC' : 'TẠO LỊCH CÔNG TÁC')) : panel === 'day' ? 'LỊCH TRONG NGÀY' : 'CHI TIẾT CHUYẾN ĐI'}</small><h2>{panel === 'form' ? (editing ? 'Chỉnh sửa lịch' : (isAdmin ? 'Phân công công tác' : 'Tạo lịch công tác')) : panel === 'day' ? dateLabel(fromKey(selectedDate), { day: 'numeric', month: 'long' }) : 'Chi tiết chuyến đi'}</h2></div><button className="iconbtn" aria-label="Đóng bảng chi tiết" onClick={() => setPanel('')}><X size={20}/></button></div>
+          {panel === 'form' && canCreate && <form className="schedule-form" onSubmit={save}>
+            <p>{editing ? (isAdmin ? 'Cập nhật thông tin chuyến công tác đã phân công.' : 'Cập nhật chuyến công tác của bạn.') : (isAdmin ? 'Phân công chuyến công tác cho nhân viên.' : 'Thêm chuyến công tác mới vào lịch của bạn.')}</p>
             <label>Tên chuyến công tác<input required maxLength="255" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Ví dụ: Gặp đối tác"/></label>
             <div className="schedule-time-pair"><label>Ngày bắt đầu<input required type="date" value={form.startDay} onChange={e => setForm({ ...form, startDay: e.target.value })}/></label><label>Ngày kết thúc<input required type="date" min={form.startDay} value={form.endDay} onChange={e => setForm({ ...form, endDay: e.target.value })}/></label></div>
             <div className="schedule-time-pair"><label>Giờ bắt đầu<input required type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })}/></label><label>Giờ kết thúc<input required type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })}/></label></div>
             <label>Địa điểm<input required maxLength="255" value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} placeholder="Thành phố, địa chỉ"/></label>
-            <label>Nhân viên được phân công<select required value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} disabled={employeeBusy}><option value="">Chọn nhân viên</option>{activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>
+            {isAdmin ? (
+              <label>Người được phân công<select required value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} disabled={employeeBusy}><option value="">Chọn người được phân công</option>{activeEmployees.map(e => <option key={e.id} value={e.id}>{formatPersonLabel(e)}</option>)}</select></label>
+            ) : (
+              <label>Nhân viên<input type="text" value={user.full_name} disabled/><small className="schedule-field-hint">Lịch công tác được phân cho chính bạn</small></label>
+            )}
             <label>Ghi chú<textarea rows="4" maxLength="5000" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Thông tin cần lưu ý (không bắt buộc)"/></label>
             {error && <p className="schedule-inline-error" role="alert">{error}</p>}
-            <div className="schedule-form-actions"><button type="button" className="btn btn-outline" onClick={() => setPanel(editing ? 'detail' : '')}>Hủy</button><button className="btn btn-primary" disabled={saving || employeeBusy}>{saving ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : 'Phân công'}</button></div>
+            <div className="schedule-form-actions"><button type="button" className="btn btn-outline" onClick={() => setPanel(editing ? 'detail' : '')}>Hủy</button><button className="btn btn-primary" disabled={saving || (isAdmin && employeeBusy)}>{saving ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : (isAdmin ? 'Phân công' : 'Tạo lịch')}</button></div>
           </form>}
           {panel === 'detail' && selected && <div className="schedule-detail">
             <span className="schedule-status-badge" style={{ backgroundColor: STATUS_CONFIG[statusKey(selected.status)].color }}>{STATUS_CONFIG[statusKey(selected.status)].label}</span><h3>{selected.title}</h3><p className="schedule-detail-destination">Chuyến công tác · {selected.destination}</p>
             <div className="schedule-detail-row"><CalendarDays/><span><small>Ngày và giờ</small><strong>{dateLabel(selected.starts_at, { day: 'numeric', month: 'long', year: 'numeric' })}{(selected.start_date || dateKey(new Date(selected.starts_at))) !== (selected.end_date || dateKey(new Date(selected.ends_at))) ? ` – ${dateLabel(selected.ends_at, { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</strong><small>{timeValue(selected.starts_at)} – {timeValue(selected.ends_at)} · GMT+7</small></span></div>
             <div className="schedule-detail-row"><MapPin/><span><small>Địa điểm</small><strong>{selected.destination}</strong></span></div>
             <div className="schedule-detail-row"><UserRound/><span><small>Nhân viên được phân công</small><strong>{selected.employee_name}</strong></span></div>
-            <div className="schedule-detail-row"><Users/><span><small>Người phân công</small><strong>{selected.created_by_name || '—'}</strong><small>Thời gian phân công: {selected.created_at ? dateLabel(selected.created_at, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</small></span></div>
+            <div className="schedule-detail-row"><Users/><span><small>Người tạo / phân công</small><strong>{selected.created_by_name || '—'}</strong><small>Thời gian tạo: {selected.created_at ? dateLabel(selected.created_at, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</small></span></div>
             <div className="schedule-notes"><strong>Ghi chú</strong><p>{selected.notes || 'Không có ghi chú.'}</p></div>
-            {!reviewer && <span className="schedule-view-only"><Eye size={15}/>Chỉ xem</span>}
-            {reviewer && <div className="schedule-detail-actions"><button className="btn btn-outline" onClick={() => openEdit(selected)}><Pencil size={15}/>Chỉnh sửa</button>
-              {selected.status !== 'completed' && selected.status !== 'cancelled' && <button className="btn btn-outline" onClick={() => changeStatus(selected, 'completed')}>Đánh dấu hoàn thành</button>}
-              {selected.status !== 'cancelled' && selected.status !== 'completed' && <button className="btn btn-danger" onClick={() => changeStatus(selected, 'cancelled')}>Hủy lịch</button>}
-              {selected.status !== 'completed' && selected.status !== 'cancelled' && <label className="schedule-status-change">Trạng thái<select value={statusKey(selected.status)} onChange={e => changeStatus(selected, e.target.value)}>{STATUS_KEYS.map(key => <option key={key} value={key}>{STATUS_CONFIG[key].label}</option>)}</select></label>}
-            </div>}
+            {(() => {
+              const canEditThis = isAdmin || (isEmployee && Number(selected.assigned_to) === Number(user.id));
+              if (canEditThis) {
+                return <div className="schedule-detail-actions"><button className="btn btn-outline" onClick={() => openEdit(selected)}><Pencil size={15}/>Chỉnh sửa</button>
+                  {selected.status !== 'completed' && selected.status !== 'cancelled' && <button className="btn btn-outline" onClick={() => changeStatus(selected, 'completed')}>Đánh dấu hoàn thành</button>}
+                  {selected.status !== 'cancelled' && selected.status !== 'completed' && <button className="btn btn-danger" onClick={() => changeStatus(selected, 'cancelled')}>Hủy lịch</button>}
+                  {selected.status !== 'completed' && selected.status !== 'cancelled' && <label className="schedule-status-change">Trạng thái<select value={statusKey(selected.status)} onChange={e => changeStatus(selected, e.target.value)}>{STATUS_KEYS.map(key => <option key={key} value={key}>{STATUS_CONFIG[key].label}</option>)}</select></label>}
+                </div>;
+              }
+              return <span className="schedule-view-only"><Eye size={15}/>{isAccountant ? 'Kế toán chỉ có quyền xem, không thể thay đổi lịch' : 'Chỉ xem'}</span>;
+            })()}
             {error && <p className="schedule-inline-error" role="alert">{error}</p>}
           </div>}
-          {panel === 'day' && <div className="schedule-day-list">{filteredItems.filter(item => tripOccursOnDate(item, selectedDate)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).map(item => { const state = STATUS_CONFIG[statusKey(item.status)]; return <button key={item.id} className="schedule-day-list-item" onClick={() => { setSelectedId(item.id); setPanel('detail'); }}><span className="schedule-status-dot" style={{ backgroundColor: state.color }}>{state.symbol}</span><span><strong>{item.title}</strong><small>{timeValue(item.starts_at)} · {state.label} · {item.employee_name}</small></span><ChevronRight size={17}/></button>; })}{!filteredItems.some(item => tripOccursOnDate(item, selectedDate)) && <p className="schedule-no-day">Chưa có chuyến công tác trong ngày này.</p>}{reviewer && <button className="btn btn-primary full" onClick={() => openCreate(selectedDate)}><Plus size={16}/>Tạo lịch trong ngày này</button>}</div>}
+          {panel === 'day' && <div className="schedule-day-list">{filteredItems.filter(item => tripOccursOnDate(item, selectedDate)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).map(item => { const state = STATUS_CONFIG[statusKey(item.status)]; return <button key={item.id} className="schedule-day-list-item" onClick={() => { setSelectedId(item.id); setPanel('detail'); }}><span className="schedule-status-dot" style={{ backgroundColor: state.color }}>{state.symbol}</span><span><strong>{item.title}</strong><small>{timeValue(item.starts_at)} · {state.label} · {item.employee_name}</small></span><ChevronRight size={17}/></button>; })}{!filteredItems.some(item => tripOccursOnDate(item, selectedDate)) && <p className="schedule-no-day">Chưa có chuyến công tác trong ngày này.</p>}{canCreate && <button className="btn btn-primary full" onClick={() => openCreate(selectedDate)}><Plus size={16}/>{isAdmin ? 'Phân công trong ngày này' : 'Tạo lịch trong ngày này'}</button>}</div>}
         </>}
       </aside>
     </div>
