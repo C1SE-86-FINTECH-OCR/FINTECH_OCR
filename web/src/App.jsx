@@ -8,6 +8,7 @@ import {api,authStore,money,datefmt,roleName,approvalName,documentTypeName,ROOT}
 import SpendingChart from './SpendingChart';
 import QuickInvoiceSearch from './QuickInvoiceSearch';
 import WorkspaceSearchPage from './WorkspaceSearchPage';
+import { matchesWorkspaceText } from './workspaceSearch';
 import EmployeeProfilePage from './EmployeeProfilePage';
 import ChatMarkdown from './ChatMarkdown.js';
 import InvoiceDetailPage from './InvoiceDetailPage';
@@ -85,8 +86,9 @@ return <div className="login-wrap"><div className="login-aside"><div className="
     ))}
   </div>
 </div></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
-const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
-function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+const messageNavItem=['/messages',"Tin nhắn",MessageSquare];
+const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
+function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
@@ -605,6 +607,10 @@ function InvoiceMessagesRoute({user}){
   return <InvoiceMessagesPage key={id} id={id} user={user}/>;
 }
 
+function messageInitials(name){
+  return name.trim().split(/\s+/).slice(-2).map(word=>word[0]).join('').toUpperCase();
+}
+
 function InvoiceMessagesPage({id,user}){
   const direct=!id;
   const [params]=useSearchParams();
@@ -612,6 +618,7 @@ function InvoiceMessagesPage({id,user}){
   const {data,busy,error,reload}=useLoad(path);
   const navigate=useNavigate();
   const [peerId,setPeerId]=useState(params.get('recipient')||'');
+  const [peerQuery,setPeerQuery]=useState('');
   const [body,setBody]=useState('');
   const [sending,setSending]=useState(false);
   const [sendError,setSendError]=useState('');
@@ -620,8 +627,18 @@ function InvoiceMessagesPage({id,user}){
   const latestPeerId=latest?.sender_id===user.id?latest.recipient_id:latest?.sender_id;
   const peer=data?.peers.find(item=>String(item.id)===peerId)||
     data?.peers.find(item=>item.id===latestPeerId)||data?.peers[0];
+  const visiblePeers=direct?(data?.peers??[])
+    .filter(item=>matchesWorkspaceText(peerQuery,item.name))
+    .map(item=>({item,givenName:item.name.trim().split(/\s+/).at(-1)}))
+    .sort((a,b)=>a.givenName.localeCompare(b.givenName,'vi')||a.item.name.localeCompare(b.item.name,'vi'))
+    .map(({item})=>item):[];
   const messages=data?.messages.filter(message=>message.sender_id===peer?.id||message.recipient_id===peer?.id)||[];
   const lastMessageId=messages.at(-1)?.id;
+  function selectPeer(value){
+    setPeerId(String(value));
+    setBody('');
+    setSendError('');
+  }
   useEffect(()=>{
     const list=messageList.current;
     if(list) list.scrollTop=list.scrollHeight;
@@ -644,20 +661,40 @@ function InvoiceMessagesPage({id,user}){
   }
 
   return <>
-    <Title title={direct?'Tin nhắn nhân viên':'Tin nhắn · Hóa đơn #'+id} action={direct?null:
+    <Title title={direct?'Tin nhắn':'Tin nhắn · Hóa đơn #'+id} action={direct?null:
       <button className="btn btn-outline" onClick={()=>navigate('/invoices/'+id)}><ChevronLeft size={16}/> Về hóa đơn</button>
     }/>
-    <section className="panel invoice-message-panel" aria-label="Cuộc trò chuyện về hóa đơn">
+    <section className={direct?'panel invoice-message-panel direct-message-panel':'panel invoice-message-panel'} aria-label={direct?'Tin nhắn':'Cuộc trò chuyện về hóa đơn'}>
+      {direct&&Boolean(data?.peers.length)&&<aside className="direct-message-peers" aria-label="Người nhận">
+        <h2>Người nhận</h2>
+        <input className="direct-message-peer-search" type="search" aria-label="Tìm người nhận theo tên"
+          placeholder="Tìm theo tên…" value={peerQuery} onChange={event=>setPeerQuery(event.target.value)}/>
+        {!visiblePeers.length&&<p className="direct-message-peer-empty" role="status">Không tìm thấy người nhận.</p>}
+        <ul>
+          {visiblePeers.map(item=><li key={item.id}>
+            <button type="button" aria-pressed={item.id===peer?.id} disabled={sending} onClick={()=>{
+              if(item.id!==peer?.id) selectPeer(item.id);
+            }}>
+              <span className="invoice-message-avatar" aria-hidden="true">{messageInitials(item.name)}</span>
+              <span className="direct-message-peer-details">
+                <strong>{item.name}</strong>
+                {item.role&&<small>{roleName(item.role)}</small>}
+              </span>
+            </button>
+          </li>)}
+        </ul>
+      </aside>}
+      <div className="invoice-message-thread">
       <header className="invoice-message-header">
         <div className="invoice-message-person">
           <span className="invoice-message-avatar" aria-hidden="true">
-            {peer?peer.name.trim().split(/\s+/).slice(-2).map(word=>word[0]).join('').toUpperCase():<MessageSquare size={21}/>}
+            {peer?messageInitials(peer.name):<MessageSquare size={21}/>}
           </span>
           <div>
-            <small>{peer?(peer.role?roleName(peer.role):'Người nhận'):'Cuộc trò chuyện'}</small>
-            {data?.peers.length>1?<select aria-label="Chọn người trao đổi" value={peer?.id} disabled={sending} onChange={event=>{
-              setPeerId(event.target.value);setBody('');setSendError('');
-            }}>{data.peers.map(item=><option key={item.id} value={item.id}>{item.name}{item.role?' · '+roleName(item.role):''}</option>)}</select>:peer?<strong>{peer.name}</strong>:null}
+            {!direct&&data?.peers.length>1?<select aria-label="Chọn người trao đổi" value={peer?.id} disabled={sending} onChange={event=>selectPeer(event.target.value)}>
+              {data.peers.map(item=><option key={item.id} value={item.id}>{item.name}{item.role?' · '+roleName(item.role):''}</option>)}
+            </select>:<strong>{peer?.name||'Cuộc trò chuyện'}</strong>}
+            {peer?.role&&<small>{roleName(peer.role)}</small>}
           </div>
         </div>
         <button className="btn btn-muted btn-small" onClick={reload} disabled={busy}><RefreshCw size={15}/> Làm mới</button>
@@ -670,18 +707,20 @@ function InvoiceMessagesPage({id,user}){
           </li>)}
         </ol>:<div className="invoice-message-empty">
           <span aria-hidden="true"><MessageSquare size={24}/></span>
-          <strong>Chưa có tin nhắn</strong>
+          <strong>{direct&&!peer?'Chưa có người nhận':'Chưa có tin nhắn'}</strong>
           {peer?.active&&<p>Gửi tin nhắn đầu tiên để bắt đầu trao đổi.</p>}
         </div>}
         {peer&&(peer.active?<form onSubmit={send} className="invoice-message-form">
-          <textarea aria-label="Nội dung tin nhắn" placeholder="Nhập nội dung trao đổi…" value={body} onChange={event=>setBody(event.target.value)} rows={3} maxLength={2000} required disabled={sending}/>
-          {sendError&&<p role="alert" className="error">{sendError}</p>}
-          <div className="invoice-message-footer">
-            <small>{body.length}/2000</small>
-            <button className="btn btn-primary" disabled={sending||busy||!body.trim()}><Send size={16}/> {sending?'Đang gửi…':'Gửi tin nhắn'}</button>
+          <div className="invoice-message-composer">
+            <textarea aria-label="Nội dung tin nhắn" placeholder="Nhập tin nhắn…" value={body} onChange={event=>setBody(event.target.value)} rows={direct?2:3} maxLength={2000} required disabled={sending}/>
+            <button type="submit" className="btn btn-primary invoice-message-send"
+              aria-label={sending?'Đang gửi…':'Gửi tin nhắn'} title={sending?'Đang gửi…':'Gửi tin nhắn'}
+              disabled={sending||busy||!body.trim()}><Send size={17} aria-hidden="true"/></button>
           </div>
+          {sendError&&<p role="alert" className="error">{sendError}</p>}
         </form>:<p className="invoice-message-state">Người nhận hiện không thể nhận tin nhắn.</p>)}
       </>}
+      </div>
     </section>
   </>;
 }
