@@ -834,3 +834,39 @@
 
 .employee-profile-card{max-width:700px}.employee-profile-heading{display:flex;align-items:center;gap:17px;margin-bottom:25px}.employee-profile-heading>.avatar{height:60px;width:60px;font-size:17px}.employee-profile-heading h2{margin:0 0 9px}.employee-profile-stats{display:flex;gap:15px;flex-wrap:wrap;margin:25px 0}.employee-profile-stats>div{background:#f6f6f7;border-radius:12px;padding:18px;flex:1;min-width:170px}.employee-profile-stats small,.employee-profile-stats strong{display:block}.employee-profile-stats strong{font-size:27px;margin-top:10px}
 
+:root {
+  font-size: 106.25%;
+}
+
+.pagehead h1 {
+  font-size: 31px;
+}
+
+.nav-item,
+.btn,
+.pagehead p,
+.stack label,
+.field-grid label,
+td {
+  font-size: 14px;
+}
+
+.btn-small,
+.textbtn,
+.today,
+.topsearch,
+.userchip,
+small {
+  font-size: 13px;
+}
+
+th,
+.pill {
+  font-size: 12px;
+}
+
+@media (max-width: 740px) {
+  .pagehead h1 {
+    font-size: 27px;
+  }
+}
