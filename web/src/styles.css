@@ -933,3 +933,40 @@
   .chat-layout{grid-template-columns:1fr;height:auto}
   .chat-sidebar{max-height:260px}
 }
+
+:root {
+  font-size: 106.25%;
+}
+
+.pagehead h1 {
+  font-size: 31px;
+}
+
+.nav-item,
+.btn,
+.pagehead p,
+.stack label,
+.field-grid label,
+td {
+  font-size: 14px;
+}
+
+.btn-small,
+.textbtn,
+.today,
+.topsearch,
+.userchip,
+small {
+  font-size: 13px;
+}
+
+th,
+.pill {
+  font-size: 12px;
+}
+
+@media (max-width: 740px) {
+  .pagehead h1 {
+    font-size: 27px;
+  }
+}

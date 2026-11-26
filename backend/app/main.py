@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from io import BytesIO
@@ -40,6 +40,12 @@ async def lifespan(app):
     # issue DDL against either the main or isolated PostgreSQL database.
     if settings.app_env == 'development' and settings.database_url.startswith('sqlite'):
         Base.metadata.create_all(bind=engine)
+        try:
+            from .seed import seed_accountant_schedules
+            with SessionLocal() as db:
+                seed_accountant_schedules(db)
+        except Exception as e:
+            logger.warning('Auto-seed accountant schedules skipped: %s', e)
     storage_dir()
     yield
 app=FastAPI(title='FINTECH OCR API',version='0.1.0',lifespan=lifespan,description='API bản MVP của C1SE.86; AI provider và tra cứu thuế tự động chưa tích hợp')
@@ -1191,9 +1197,82 @@ def download_report(report_id:int,db:Session=Depends(db_session),user=Depends(re
     if not report or not report.artifact_data:fail('Không tìm thấy báo cáo hoặc bạn không có quyền tải xuống',404)
     audit(db,user.id,'report.downloaded','report',report.id);db.commit()
     return StreamingResponse(BytesIO(report.artifact_data),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="{report.filename or "bao_cao.xlsx"}"'})
+def _parse_vn_audit_date_range(day: str = '', month: str = '', year: str = '', date_from: str = '', date_to: str = '', db: Session | None = None):
+    import calendar
+    vn_tz = ZoneInfo('Asia/Ho_Chi_Minh')
+    df, dt = date_from.strip(), date_to.strip()
+    if day.strip():
+        df = dt = day.strip()
+    elif month.strip():
+        parts = month.strip().split('-')
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            y, m = int(parts[0]), int(parts[1])
+            if 1 <= m <= 12:
+                df = f"{y:04d}-{m:02d}-01"
+                dt = f"{y:04d}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"
+    elif year.strip() and year.strip().isdigit():
+        y = int(year.strip())
+        df = f"{y:04d}-01-01"
+        dt = f"{y:04d}-12-31"
+
+    if not df and not dt:
+        return None, None
+    if df and not dt:
+        dt = df
+    elif dt and not df:
+        df = dt
+
+    try:
+        start_d = datetime.strptime(df, "%Y-%m-%d").date()
+        end_d = datetime.strptime(dt, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None, None
+
+    start_vn = datetime(start_d.year, start_d.month, start_d.day, 0, 0, 0, tzinfo=vn_tz)
+    end_vn = datetime(end_d.year, end_d.month, end_d.day, 0, 0, 0, tzinfo=vn_tz) + timedelta(days=1)
+    start_utc = start_vn.astimezone(timezone.utc)
+    end_utc = end_vn.astimezone(timezone.utc)
+
+    if db is not None and getattr(db.get_bind().dialect, 'name', '') == 'sqlite':
+        return start_utc.replace(tzinfo=None), end_utc.replace(tzinfo=None)
+    return start_utc, end_utc
+
 @app.get('/api/v1/audit-logs')
-def audit_logs(db:Session=Depends(db_session),user=Depends(require_roles('admin'))):
-    return [{'id':a.id,'actor_id':a.actor_id,'action':a.action,'entity_type':a.entity_type,'entity_id':a.entity_id,'created_at':a.created_at.isoformat()} for a in db.scalars(select(AuditLog).order_by(desc(AuditLog.id)).limit(200)).all()]
+def audit_logs(
+    day: str = '',
+    month: str = '',
+    year: str = '',
+    period: str = '',
+    date_value: str = '',
+    date_from: str = '',
+    date_to: str = '',
+    db: Session = Depends(db_session),
+    user = Depends(require_roles('admin')),
+):
+    if period == 'day' and date_value:
+        day = date_value
+    elif period == 'month' and date_value:
+        month = date_value
+    elif period == 'year' and date_value:
+        year = date_value
+
+    query = select(AuditLog, User.full_name).outerjoin(User, User.id == AuditLog.actor_id).order_by(desc(AuditLog.id))
+    start_dt, end_dt = _parse_vn_audit_date_range(day=day, month=month, year=year, date_from=date_from, date_to=date_to, db=db)
+    if start_dt is not None and end_dt is not None:
+        query = query.where(AuditLog.created_at >= start_dt, AuditLog.created_at < end_dt)
+    rows = db.execute(query.limit(200)).all()
+    return [
+        {
+            'id': a.id,
+            'actor_id': a.actor_id,
+            'actor_name': actor_name if (a.actor_id is not None and actor_name) else 'Không xác định',
+            'action': a.action,
+            'entity_type': a.entity_type,
+            'entity_id': a.entity_id,
+            'created_at': a.created_at.isoformat() if hasattr(a.created_at, 'isoformat') else str(a.created_at),
+        }
+        for a, actor_name in rows
+    ]
 IMAGE_PREFIX = "[IMAGE_ATTACHED:"
 
 def parse_image_data(image_data: str | None) -> tuple[bytes | None, str]:
