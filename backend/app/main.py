@@ -5,11 +5,10 @@ from zoneinfo import ZoneInfo
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
-from collections import Counter,defaultdict
+from collections import defaultdict
 from math import isfinite
 import hashlib, re, json, unicodedata, time
 import logging
-from copy import copy
 from weakref import WeakKeyDictionary
 import jwt
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Body, Response, Request
@@ -26,6 +25,7 @@ from openpyxl import Workbook
 from .core import Base,engine,db_session,current_user,require_roles,settings,hash_password,verify_password,make_token,bearer,storage_dir,SessionLocal
 from .models import *
 from .invoice_search import apply_invoice_search, normalize_search
+from .report_workbook import NUMBER_FORMAT, TEXT_FORMAT, append_report_row, report_sheet
 from .extraction import text_from_file,extract_fields,extract_line_items,validate
 from .risk_checks import assess_invoice_risks
 from . import gemini_chat
@@ -141,9 +141,9 @@ def inv_ser(i,db,details=False):
         payload['submitted_at']=submitted_at.isoformat() if hasattr(submitted_at,'isoformat') else str(submitted_at) if submitted_at else None
     return payload
 
-def invoice_q(db,user):
+def invoice_q(db,user,*,personal=False):
     q=select(Invoice).join(InvoiceFile,Invoice.file_id==InvoiceFile.id)
-    return q if user.role in ('admin','accountant') else q.where(InvoiceFile.uploaded_by==user.id)
+    return q if not personal and user.role in ('admin','accountant') else q.where(InvoiceFile.uploaded_by==user.id)
 def invoice_allowed(db,user,invoice_id):
     obj=db.scalar(invoice_q(db,user).where(Invoice.id==invoice_id))
     if not obj:fail('KhÃ´ng tÃ¬m tháº¥y hÃ³a Ä‘Æ¡n hoáº·c báº¡n khÃ´ng cÃ³ quyá»n xem',404)
@@ -298,7 +298,7 @@ def directory_employees(db:Session=Depends(db_session),user=Depends(require_role
     return [ser(u) for u in db.scalars(select(User).where(User.role.in_(['employee','accountant']),User.status=='active').order_by(User.full_name)).all()]
 
 def employee_profile_data(target,viewer,scores):
-    score=next(((index+1,row['completed']) for index,row in enumerate(scores) if row['user_id']==target.id),None)
+    score=next(((row['rank'],row['completed']) for row in scores if row['user_id']==target.id),None)
     result={'id':target.id,'full_name':target.full_name,'role':target.role,'completed_trips':score[1] if score else 0,'rank':score[0] if score else None}
     if viewer.role in ('admin','accountant') or viewer.id==target.id:
         result.update(email=target.email,status=target.status)
@@ -408,6 +408,35 @@ def password_edit(body:PasswordEdit,user=Depends(current_user),db:Session=Depend
     if verify_password(body.new_password,user.password_hash):fail('Mật khẩu mới phải khác mật khẩu hiện tại')
     user.password_hash=hash_password(body.new_password);audit(db,user.id,'profile.password_changed','user',user.id);db.commit()
     return {'message':'Đã đổi mật khẩu'}
+@app.get('/api/v1/profile/invoices')
+def profile_invoices(
+    invoice_date_from: date | None = None,
+    invoice_date_to: date | None = None,
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(db_session),
+    user=Depends(current_user),
+):
+    if invoice_date_from and invoice_date_to and invoice_date_from > invoice_date_to:
+        fail('Từ ngày không được sau Đến ngày', 422)
+
+    query = invoice_q(db, user, personal=True)
+    if invoice_date_from:
+        query = query.where(Invoice.invoice_date >= invoice_date_from)
+    if invoice_date_to:
+        query = query.where(Invoice.invoice_date <= invoice_date_to)
+    total = db.scalar(query.with_only_columns(func.count(Invoice.id)))
+    rows = db.execute(
+        query.with_only_columns(
+            Invoice.id, Invoice.invoice_date, Invoice.approval_status,
+            Invoice.seller_name, InvoiceFile.original_filename.label('filename'),
+        )
+        .order_by(desc(Invoice.created_at), desc(Invoice.id))
+        .offset(offset).limit(limit)
+    ).mappings()
+    return {'items': [dict(row) for row in rows], 'total': total}
+
+
 @app.get('/api/v1/invoices')
 def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
     query=invoice_q(db,user)
@@ -961,18 +990,71 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
         if assigned_to!=user.id:
             notify(db,assigned_to,title,message,schedule_id=s.id,event_type=event)
     audit(db,user.id,'schedule.updated','schedule',s.id);db.commit();return schedule_ser(s,db)
+RANKING_TIMEZONE = 'Asia/Ho_Chi_Minh'
+
+
+def ranking_local_time(db, timestamp):
+    if db.get_bind().dialect.name == 'sqlite':
+        return func.datetime(timestamp, '+7 hours')
+    return func.timezone(RANKING_TIMEZONE, timestamp)
+
+
+def ranking_date(db):
+    return ranking_local_time(db, func.coalesce(Schedule.completed_at, Schedule.ends_at))
+
+
+@app.get('/api/v1/ranking/years')
+def ranking_years(db: Session = Depends(db_session), user=Depends(current_user)):
+    current_year = datetime.now(ZoneInfo(RANKING_TIMEZONE)).year
+    first_start, first_completion = db.execute(select(
+        func.min(func.extract('year', ranking_local_time(db, Schedule.starts_at))),
+        func.min(func.extract('year', ranking_date(db))),
+    )).one()
+    earliest = min((int(year) for year in (first_start, first_completion) if year is not None), default=current_year)
+    # Offer past years even for installations with no historical schedules.
+    first_year = earliest if earliest < current_year else max(1, current_year - 5)
+    last_year = min(9999, current_year + 5)
+    return {'current_year': current_year, 'years': list(range(last_year, first_year - 1, -1))}
+
+
 @app.get('/api/v1/ranking')
-def ranking(period:str=Query('all',pattern='^(all|month|quarter|year)$'),db:Session=Depends(db_session),user=Depends(current_user)):
-    rows=db.scalars(select(Schedule).where(Schedule.status=='completed')).all()
-    today=datetime.now(timezone.utc)
-    def ok(s):
-        t=s.completed_at or s.ends_at
-        if period=='month':return t.year==today.year and t.month==today.month
-        if period=='quarter':return t.year==today.year and (t.month-1)//3==(today.month-1)//3
-        if period=='year':return t.year==today.year
-        return True
-    scores=Counter(x.assigned_to for x in rows if ok(x))
-    return [{'user_id':uid,'full_name':db.get(User,uid).full_name,'completed':cnt} for uid,cnt in scores.most_common() if db.get(User,uid)]
+def ranking(
+    period: str = Query('all', pattern='^(all|month|quarter|year)$'),
+    db: Session = Depends(db_session),
+    user=Depends(current_user),
+    *,
+    year: int | None = None,
+):
+    if year is not None and not 1 <= year <= 9999:
+        fail('Năm không hợp lệ', 422)
+    completed = func.count(Schedule.id)
+    query = (
+        select(User.id, User.full_name, completed)
+        .join(Schedule, Schedule.assigned_to == User.id)
+        .where(Schedule.status == 'completed')
+        .group_by(User.id, User.full_name)
+        .order_by(completed.desc(), User.id)
+    )
+    if year is not None or period != 'all':
+        local_date = ranking_date(db)
+        today = datetime.now(ZoneInfo(RANKING_TIMEZONE))
+        query = query.where(func.extract('year', local_date) == (year if year is not None else today.year))
+        if year is None and period in ('month', 'quarter'):
+            month = func.extract('month', local_date)
+            if period == 'month':
+                query = query.where(month == today.month)
+            else:
+                first_month = ((today.month - 1) // 3) * 3 + 1
+                query = query.where(month.between(first_month, first_month + 2))
+    rows = []
+    previous_count = None
+    rank = 0
+    for position, (user_id, full_name, count) in enumerate(db.execute(query), start=1):
+        if count != previous_count:
+            rank = position
+            previous_count = count
+        rows.append({'user_id': user_id, 'full_name': full_name, 'completed': count, 'rank': rank})
+    return rows
 def _report_invoice_query(db,user,approval_status='',validation_status='',document_type='',search='',invoice_date_from=None,invoice_date_to=None,seller_name='',lookup_status=''):
     q=invoice_q(db,user)
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
@@ -983,19 +1065,23 @@ def _report_invoice_query(db,user,approval_status='',validation_status='',docume
     if lookup_status:q=q.where(Invoice.lookup_status==lookup_status)
     if invoice_date_from:q=q.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:q=q.where(Invoice.invoice_date<=invoice_date_to)
-    if search:
-        word=f'%{search.strip()}%'
-        q=q.where(Invoice.invoice_number.ilike(word)|Invoice.seller_name.ilike(word))
-    return q
+    return apply_invoice_search(q, db, search)[0]
 
 def report_filters(approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status):
     return {'approval_status':approval_status,'validation_status':validation_status,'document_type':document_type,'search':search,'invoice_date_from':invoice_date_from.isoformat() if invoice_date_from else None,'invoice_date_to':invoice_date_to.isoformat() if invoice_date_to else None,'seller_name':seller_name,'lookup_status':lookup_status}
 
-def report_totals(rows):
-    def total(field):
-        values=[Decimal(str(getattr(i,field))) for i in rows if getattr(i,field) is not None]
-        return float(round(sum(values,Decimal('0')),2)) if values else (0 if not rows else None)
-    return {'invoice_count':len(rows),'subtotal':total('subtotal'),'vat_amount':total('vat_amount'),'total_amount':total('total_amount'),'currency':'VND'}
+def report_totals(db, query):
+    count, subtotal, vat, total = db.execute(query.with_only_columns(
+        func.count(Invoice.id), func.sum(Invoice.subtotal),
+        func.sum(Invoice.vat_amount), func.sum(Invoice.total_amount),
+    )).one()
+    return {
+        'invoice_count': count,
+        'subtotal': decimal(subtotal) if count else 0,
+        'vat_amount': decimal(vat) if count else 0,
+        'total_amount': decimal(total) if count else 0,
+        'currency': 'VND',
+    }
 
 @app.get('/api/v1/reports/suppliers')
 def reports_suppliers(db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
@@ -1003,13 +1089,13 @@ def reports_suppliers(db:Session=Depends(db_session),user=Depends(require_roles(
 
 @app.get('/api/v1/reports/summary')
 def reports_summary(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
-    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)).all()
-    return report_totals(rows)
+    query=_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)
+    return report_totals(db, query)
 
 @app.get('/api/v1/reports/invoices')
 def reports_invoices(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',limit:int=Query(10,ge=1,le=50),offset:int=Query(0,ge=0),sort_by:str=Query('date',pattern='^(date|total)$'),sort_order:str=Query('desc',pattern='^(asc|desc)$'),db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     query=_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)
-    count=db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    count=db.scalar(query.with_only_columns(func.count(Invoice.id)))
     order=Invoice.total_amount if sort_by=='total' else Invoice.invoice_date
     rows=db.scalars(query.order_by(desc(order).nullslast() if sort_order=='desc' else order.asc().nullslast(),desc(Invoice.id)).limit(limit).offset(offset)).all()
     return {'items':[{'id':i.id,'invoice_number':i.invoice_number,'invoice_date':i.invoice_date.isoformat() if i.invoice_date else None,'seller_name':i.seller_name,'seller_tax_code':i.seller_tax_code,'subtotal':decimal(i.subtotal),'vat_amount':decimal(i.vat_amount),'total_amount':decimal(i.total_amount),'approval_status':i.approval_status,'validation_status':i.validation_status,'lookup_status':i.lookup_status,'document_type':i.document_type} for i in rows],'total':count}
@@ -1018,39 +1104,79 @@ def reports_invoices(approval_status:str='',validation_status:str='',document_ty
 def export_excel(approval_status:str='',validation_status:str='',document_type:str='',search:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,seller_name:str='',lookup_status:str='',sort_by:str=Query('date',pattern='^(date|total)$'),sort_order:str=Query('desc',pattern='^(asc|desc)$'),db:Session=Depends(db_session),user=Depends(require_roles('accountant','admin'))):
     order=Invoice.total_amount if sort_by=='total' else Invoice.invoice_date
     ordering=desc(order).nullslast() if sort_order=='desc' else order.asc().nullslast()
-    rows=db.scalars(_report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status).order_by(ordering,desc(Invoice.id))).all();w=Workbook();overview=w.active;overview.title='Tổng quan báo cáo'
-    filters=report_filters(approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status);totals=report_totals(rows)
+    query = _report_invoice_query(db,user,approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)
+    totals = report_totals(db, query)
+    filters=report_filters(approval_status,validation_status,document_type,search,invoice_date_from,invoice_date_to,seller_name,lookup_status)
     labels={'approval_status':'Phê duyệt','validation_status':'Kiểm tra','document_type':'Loại chứng từ','search':'Từ khóa','invoice_date_from':'Từ ngày','invoice_date_to':'Đến ngày','seller_name':'Nhà cung cấp','lookup_status':'Tra cứu'}
     states={'draft':'Nháp','pending':'Chờ xử lý','approved':'Đã phê duyệt','rejected':'Đã từ chối','valid':'Hợp lệ','needs_review':'Cần kiểm tra','error':'Lỗi','verified':'Đã xác minh','mismatch':'Không khớp','not_found':'Không tìm thấy','not_checked':'Chưa tra cứu','not_applicable':'Không áp dụng','einvoice':'Hóa đơn điện tử','bill':'Chứng từ','unknown':'Chưa xác định'}
     filter_summary=' · '.join(f"{labels.get(key,key)}: {states.get(value,value)}" for key,value in filters.items() if value) or 'Không lọc'
-    overview.append(['BÁO CÁO HÓA ĐƠN']);overview.append(['Thời gian xuất',datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S')]);overview.append(['Người xuất',excel_text(user.full_name)]);overview.append(['Điều kiện lọc',excel_text(filter_summary)]);overview.append(['Số hóa đơn',totals['invoice_count']]);overview.append(['Tổng trước thuế (VND)',totals['subtotal']]);overview.append(['Tổng VAT (VND)',totals['vat_amount']]);overview.append(['Tổng thanh toán (VND)',totals['total_amount']])
-    overview.column_dimensions['A'].width=30;overview.column_dimensions['B'].width=75
-    for cell in overview[1]:
-        font=copy(cell.font);font.bold=True;font.sz=16;cell.font=font
-    sheet=w.create_sheet('Danh sách hóa đơn');sheet.append(['ID','Số hóa đơn','Ký hiệu','Nhà cung cấp','Mã số thuế','Tên người mua','MST người mua','Ngày lập hóa đơn','Tiền trước thuế','Thuế suất (%)','Thuế VAT','Tổng thanh toán','Trạng thái kiểm tra','Trạng thái phê duyệt','Trạng thái tra cứu','Loại chứng từ'])
-    for i in rows:sheet.append([i.id,excel_text(i.invoice_number),excel_text(i.invoice_symbol),excel_text(i.seller_name),excel_text(i.seller_tax_code),excel_text(i.buyer_name),excel_text(i.buyer_tax_code),i.invoice_date,i.subtotal,i.vat_rate,i.vat_amount,i.total_amount,excel_text(i.validation_status),excel_text(i.approval_status),excel_text(i.lookup_status),excel_text(i.document_type)])
-    sheet.append(['','','','','','','','Tổng cộng',totals['subtotal'],None,totals['vat_amount'],totals['total_amount']])
-    for row in sheet.iter_rows(min_row=2,max_row=len(rows)+2):
-        row[7].number_format='dd/mm/yyyy'
-        for cell in (row[8],row[10],row[11]):cell.number_format='#,##0.00'
-    for cell in sheet[1]+sheet[len(rows)+2]:
-        font=copy(cell.font);font.bold=True;cell.font=font
-    sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:P{len(rows)+1}'
-    for col,width in zip('ABCDEFGHIJKLMNOP',[10,22,20,35,20,35,20,16,17,15,17,20,18,18,18,15]):sheet.column_dimensions[col].width=width
-    item_sheet=w.create_sheet('Chi tiết hàng hóa');item_sheet.append(['ID hóa đơn','Số hóa đơn','Dòng','Mô tả','Đơn vị','Số lượng','Đơn giá (VND)','Thành tiền (VND)'])
-    invoice_ids=[i.id for i in rows]
-    if invoice_ids:
-        item_rows=db.scalars(select(InvoiceItem).where(InvoiceItem.invoice_id.in_(invoice_ids)).order_by(InvoiceItem.invoice_id,InvoiceItem.line_no)).all()
-        invoice_numbers={i.id:i.invoice_number for i in rows}
-        for item in item_rows:item_sheet.append([item.invoice_id,excel_text(invoice_numbers.get(item.invoice_id)),item.line_no,excel_text(item.description),excel_text(item.unit),decimal(item.quantity),decimal(item.unit_price),decimal(item.amount)])
-    item_sheet.freeze_panes='A2';item_sheet.auto_filter.ref=item_sheet.dimensions
-    for row in item_sheet.iter_rows(min_row=2):
-        for cell in row[5:8]:cell.number_format='#,##0.00'
-    for cell in item_sheet[1]:
-        font=copy(cell.font);font.bold=True;cell.font=font
-    for col,width in zip('ABCDEFGH',[12,22,14,45,16,15,20,20]):item_sheet.column_dimensions[col].width=width
-    data=BytesIO();w.save(data);artifact=data.getvalue();stamp=datetime.now().strftime('%Y%m%d_%H%M%S_%f');filename=f'bao_cao_hoa_don_{stamp}.xlsx'
-    record=Report(requested_by=user.id,filters=filters,filename=filename,row_count=len(rows),total_amount=totals['total_amount'],status='completed',artifact_data=artifact)
+    workbook = Workbook(write_only=True)
+    overview = report_sheet(workbook, 'Tổng quan báo cáo', (32, 75))
+    overview.row_dimensions[4].height = 45
+    append_report_row(overview, ['BÁO CÁO HÓA ĐƠN', None], emphasis='title')
+    for label, value in (
+        ('Thời gian xuất', datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S')),
+        ('Người xuất', excel_text(user.full_name)),
+        ('Điều kiện lọc', excel_text(filter_summary)),
+        ('Số hóa đơn', totals['invoice_count']),
+    ):
+        append_report_row(overview, [label, value], right=(2,) if isinstance(value, int) else (), wrap=(2,))
+    for label, field in (
+        ('Tổng trước thuế (VND)', 'subtotal'), ('Tổng VAT (VND)', 'vat_amount'),
+        ('Tổng thanh toán (VND)', 'total_amount'),
+    ):
+        append_report_row(overview, [label, totals[field]], right=(2,), formats={2: NUMBER_FORMAT},
+                          emphasis='total' if field == 'total_amount' else None)
+
+    sheet = report_sheet(workbook, 'Danh sách hóa đơn',
+                         (10, 22, 20, 38, 20, 38, 20, 20, 19, 17, 19, 22, 22, 23, 21, 18),
+                         landscape=True)
+    append_report_row(sheet, [
+        'ID', 'Số hóa đơn', 'Ký hiệu', 'Nhà cung cấp', 'Mã số thuế', 'Tên người mua',
+        'MST người mua', 'Ngày lập hóa đơn', 'Tiền trước thuế', 'Thuế suất (%)',
+        'Thuế VAT', 'Tổng thanh toán', 'Trạng thái kiểm tra', 'Trạng thái phê duyệt',
+        'Trạng thái tra cứu', 'Loại chứng từ',
+    ], center=(1, 8), right=(9, 10, 11, 12), emphasis='header')
+    money_formats = {column: NUMBER_FORMAT for column in (9, 11, 12)}
+    invoice_formats = {2: TEXT_FORMAT, 5: TEXT_FORMAT, 7: TEXT_FORMAT, 8: 'dd/mm/yyyy', **money_formats}
+    invoice_row = 1
+    rows = db.scalars(query.order_by(ordering, desc(Invoice.id)).execution_options(yield_per=500))
+    for invoice_row, i in enumerate(rows, start=2):
+        append_report_row(sheet, [
+            i.id, excel_text(i.invoice_number), excel_text(i.invoice_symbol), excel_text(i.seller_name),
+            excel_text(i.seller_tax_code), excel_text(i.buyer_name), excel_text(i.buyer_tax_code),
+            i.invoice_date, i.subtotal, i.vat_rate, i.vat_amount, i.total_amount,
+            excel_text(i.validation_status), excel_text(i.approval_status),
+            excel_text(i.lookup_status), excel_text(i.document_type),
+        ], center=(1, 8), right=(9, 10, 11, 12), wrap=(4, 6), formats=invoice_formats)
+    append_report_row(sheet, [
+        None, None, None, None, None, None, None, 'Tổng cộng', totals['subtotal'], None,
+        totals['vat_amount'], totals['total_amount'], None, None, None, None,
+    ], right=(9, 10, 11, 12), formats=money_formats, emphasis='total')
+    sheet.auto_filter.ref = f'A1:P{invoice_row}'
+
+    item_sheet = report_sheet(workbook, 'Chi tiết hàng hóa', (14, 22, 10, 55, 16, 15, 20, 22), landscape=True)
+    append_report_row(item_sheet, [
+        'ID hóa đơn', 'Số hóa đơn', 'Dòng', 'Mô tả', 'Đơn vị', 'Số lượng',
+        'Đơn giá (VND)', 'Thành tiền (VND)',
+    ], center=(1, 3), right=(6, 7, 8), emphasis='header')
+    selected = query.with_only_columns(Invoice.id, Invoice.invoice_number).subquery()
+    item_query = (
+        select(InvoiceItem, selected.c.invoice_number)
+        .join(selected, InvoiceItem.invoice_id == selected.c.id)
+        .order_by(InvoiceItem.invoice_id, InvoiceItem.line_no, InvoiceItem.id)
+        .execution_options(yield_per=500)
+    )
+    item_row = 1
+    item_formats = {2: TEXT_FORMAT, 6: NUMBER_FORMAT, 7: NUMBER_FORMAT, 8: NUMBER_FORMAT}
+    for item_row, (item, invoice_number) in enumerate(db.execute(item_query), start=2):
+        append_report_row(item_sheet, [
+            item.invoice_id, excel_text(invoice_number), item.line_no, excel_text(item.description),
+            excel_text(item.unit), item.quantity, item.unit_price, item.amount,
+        ], center=(1, 3), right=(6, 7, 8), wrap=(4,), formats=item_formats)
+    item_sheet.auto_filter.ref = f'A1:H{item_row}'
+    data=BytesIO();workbook.save(data);artifact=data.getvalue();stamp=datetime.now().strftime('%Y%m%d_%H%M%S_%f');filename=f'bao_cao_hoa_don_{stamp}.xlsx'
+    record=Report(requested_by=user.id,filters=filters,filename=filename,row_count=invoice_row-1,total_amount=totals['total_amount'],status='completed',artifact_data=artifact)
     db.add(record);db.flush();audit(db,user.id,'report.exported','report',record.id);db.commit()
     return StreamingResponse(BytesIO(artifact),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="{filename}"'})
 
