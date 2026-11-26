@@ -8,7 +8,7 @@ export function matchesWorkspaceText(query,...fields){
 }
 export function rankingSearchResults(rows,query){
  const allRanking=['ranking','bang xep hang','nhan vien di nhieu nhat','di cong tac nhieu nhat'].includes(normalizeWorkspaceText(query));
- return rows.map((r,index)=>({...r,rank:index+1})).filter(r=>allRanking||matchesWorkspaceText(query,r.full_name)).map(r=>({key:'ranking-'+r.user_id,kind:'Ranking',title:r.full_name,subtitle:'Chuyến công tác hoàn thành · Toàn thời gian',metric:r.completed+' chuyến hoàn thành',detail:'#'+r.rank+' trong bảng xếp hạng',path:'/ranking?period=all#ranking-'+r.user_id}));
+ return rows.map((r,index)=>({...r,rank:r.rank??index+1})).filter(r=>allRanking||matchesWorkspaceText(query,r.full_name)).map(r=>({key:'ranking-'+r.user_id,kind:'Ranking',title:r.full_name,subtitle:'Chuyến công tác hoàn thành · Toàn thời gian',metric:r.completed+' chuyến hoàn thành',detail:'#'+r.rank+' trong bảng xếp hạng',path:'/ranking?period=all#ranking-'+r.user_id}));
 }
 export async function searchWorkspace(get,query,limit=5){
  const requests=await Promise.allSettled([

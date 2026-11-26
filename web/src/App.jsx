@@ -1,6 +1,6 @@
 import BrandLogo,{BrandMark} from './BrandLogo.jsx';
 import InvoiceDateFilter from './InvoiceDateFilter.jsx';
-import {invoiceDateRange} from './invoiceDateFilter.js';
+import {invoiceDateRange,emptyProfileInvoiceRange,profileInvoiceQuery} from './invoiceDateFilter.js';
 import React,{createContext,useContext,useRef,useState,useEffect,useCallback,useMemo} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
 import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,ScanText,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark,Globe} from 'lucide-react';
@@ -16,6 +16,7 @@ import './invoiceMessages.css';
 import UploadPage from './UploadPage';
 import EmployeeSchedulePage from './SchedulePage';
 import { getQuickDateRange } from './reportDateRanges';
+import {reportQueries} from './reportQueries.js';
 import './profile.css';
 import { formatNotificationTimestamp, markAllNotificationsReadAfterSuccess, markNotificationReadAfterSuccess, notificationTypeLabel, openNotificationAfterAccessCheck, unreadNotificationCount } from './notificationState';
 
@@ -725,7 +726,52 @@ function InvoiceMessagesPage({id,user}){
   </>;
 }
 function SchedulePage({user}){return <EmployeeSchedulePage user={user}/>}
-function RankingPage(){const[params,setParams]=useSearchParams();const location=useLocation();const period=['all','month','quarter','year'].includes(params.get('period'))?params.get('period'):'all';const setPeriod=value=>setParams({period:value});const{data,busy,error}=useLoad('/ranking?period='+period);useEffect(()=>{if(!busy&&location.hash){document.getElementById(location.hash.slice(1))?.scrollIntoView({block:'center',behavior:'smooth'})}},[busy,data,location.hash]);return <><Title title="Xếp hạng công tác" description="Xếp hạng theo số chuyến công tác đã hoàn thành; không tính chuyến dự kiến hoặc đã hủy."/><section className="panel"><div className="filters"><h3>Bảng xếp hạng nhân viên</h3><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">Toàn thời gian</option><option value="month">Tháng này</option><option value="quarter">Quý này</option><option value="year">Năm nay</option></select></div>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="ranking">{(data||[]).map((r,i)=><div className="rankrow" id={'ranking-'+r.user_id} key={r.user_id}><span className="rank">#{i+1}</span><span className="avatar">{r.full_name.slice(-2).toUpperCase()}</span><strong>{r.full_name}</strong><span className="rank-score">{r.completed} chuyến hoàn thành</span></div>)}{!data?.length&&<Empty label="Chưa có chuyến công tác hoàn thành trong kỳ"/>}</div>}</section></>}
+function RankingPage(){
+ const [params,setParams]=useSearchParams();
+ const {data,busy,error,reload}=useLoad('/ranking/years');
+ const requestedYear=params.get('year');
+ const selected=params.get('period')==='all'?'all':
+   /^[1-9]\d{0,3}$/.test(requestedYear||'')?requestedYear:String(data?.current_year||'');
+ const years=data?.years||[];
+ const choices=selected!=='all'&&selected&&!years.includes(Number(selected))
+   ?[...years,Number(selected)].sort((a,b)=>b-a):years;
+
+ return <>
+   <Title title="Xếp hạng công tác" description="Xếp hạng theo số chuyến công tác đã hoàn thành."/>
+   <section className="panel">
+     <div className="filters">
+       <h3>Bảng xếp hạng nhân viên</h3>
+       {data&&<select aria-label="Năm công tác" value={selected}
+         onChange={e=>setParams(e.target.value==='all'?{period:'all'}:{year:e.target.value})}>
+         {choices.map(year=><option key={year} value={year}>Năm {year}</option>)}
+         <option value="all">Toàn thời gian</option>
+       </select>}
+     </div>
+     {busy?<Loading/>:error?<div><p className="error" role="alert">{error}</p>
+       <button type="button" className="btn btn-outline" onClick={reload}>Thử lại</button></div>:
+       <RankingTable key={selected} selected={selected}/>}
+   </section>
+ </>;
+}
+
+function RankingTable({selected}){
+ const {hash}=useLocation();
+ const {data,busy,error}=useLoad('/ranking?'+(selected==='all'?'period=all':'year='+selected));
+ useEffect(()=>{
+   if(!busy&&hash)document.getElementById(hash.slice(1))?.scrollIntoView({block:'center',behavior:'smooth'});
+ },[busy,data,hash]);
+ if(busy)return <Loading/>;
+ if(error)return <p className="error" role="alert">{error}</p>;
+ return <div className="ranking">
+   {data?.map(r=><div className="rankrow" id={'ranking-'+r.user_id} key={r.user_id}>
+     <span className="rank">#{r.rank}</span>
+     <span className="avatar">{r.full_name.slice(-2).toUpperCase()}</span>
+     <strong>{r.full_name}</strong>
+     <span className="rank-score">{r.completed} chuyến hoàn thành</span>
+   </div>)}
+   {!data?.length&&<Empty label={selected==='all'?'Chưa có chuyến công tác hoàn thành':'Không có dữ liệu công tác trong năm này'}/>}
+ </div>;
+}
 function compressImage(file,maxDimension=1280,quality=0.85){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
@@ -1430,31 +1476,48 @@ function ChatPage({user}){
 function ReportsPage(){
  const navigate=useNavigate();
  const blank={approval_status:'',validation_status:'',document_type:'',search:'',invoice_date_from:'',invoice_date_to:'',seller_name:'',lookup_status:''};
- const [filters,setFilters]=useState(blank),[applied,setApplied]=useState(blank),[summary,setSummary]=useState(null),[pageData,setPageData]=useState(null),[suppliers,setSuppliers]=useState([]),[history,setHistory]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[page,setPage]=useState(0),[pageSize,setPageSize]=useState(10),[sortBy,setSortBy]=useState('date'),[sortOrder,setSortOrder]=useState('desc');
+ const [filters,setFilters]=useState(blank),[applied,setApplied]=useState(blank),[search,setSearch]=useState('');
+ const [result,setResult]=useState(null),[suppliers,setSuppliers]=useState([]),[history,setHistory]=useState([]);
+ const [exporting,setExporting]=useState(false),[error,setError]=useState('');
+ const [page,setPage]=useState(0),[pageSize,setPageSize]=useState(10),[sortBy,setSortBy]=useState('date'),[sortOrder,setSortOrder]=useState('desc');
+ const {summary:summaryPath,preview:previewPath,export:exportPath}=reportQueries(applied,{page,pageSize,sortBy,sortOrder});
+ const current=result?.path===previewPath?result:null;
+ const summary=current?.summary,pageData=current?.pageData,queryError=current?.error;
+ const busy=!current;
  function change(key,value){setFilters(current=>({...current,[key]:value}))}
- function paramsFor(f=applied){const p=new URLSearchParams();Object.entries(f).forEach(([k,v])=>{if(v)p.set(k,v)});return p.toString()}
- const query=paramsFor();
  async function loadHistory(){setHistory(await api('/reports/history'))}
- async function load(){setBusy(true);setError('');try{const [s,rows]=await Promise.all([api('/reports/summary'+(query?'?'+query:'')),api('/reports/invoices?'+(query?query+'&':'')+new URLSearchParams({limit:pageSize,offset:page*pageSize,sort_by:sortBy,sort_order:sortOrder}).toString())]);setSummary(s);setPageData(rows)}catch(e){setError(e.message)}finally{setBusy(false)}}
  useEffect(()=>{api('/reports/suppliers').then(setSuppliers).catch(e=>setError(e.message));loadHistory().catch(e=>setError(e.message))},[]);
- useEffect(()=>{load()},[applied,page,pageSize,sortBy,sortOrder]);
- function apply(){setPage(0);setApplied({...filters})}
- function reset(){setFilters(blank);setPage(0);setApplied(blank)}
+ useEffect(()=>{
+   let active=true;
+   Promise.all([api(summaryPath),api(previewPath)])
+     .then(([summary,pageData])=>{if(active)setResult({path:previewPath,summary,pageData})})
+     .catch(e=>{if(active)setResult({path:previewPath,error:e.message})});
+   return ()=>{active=false};
+ },[summaryPath,previewPath,applied]);
+ function apply(){setResult(null);setPage(0);setApplied({...filters,search:applied.search})}
+ function applySearch(value){setResult(null);setPage(0);setApplied(current=>({...current,search:value.trim()}))}
+ function reset(){setFilters(blank);setSearch('');setPage(0);setApplied(blank)}
   function quickRange(which){const range=getQuickDateRange(which);change('invoice_date_from',range.from);change('invoice_date_to',range.to)}
  async function saveBlob(response,filename){const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
- async function exportNow(){setBusy(true);setError('');try{if(!summary?.invoice_count){setError('Không có hóa đơn phù hợp để xuất.');return}const exportParams=new URLSearchParams(query);exportParams.set('sort_by',sortBy);exportParams.set('sort_order',sortOrder);const response=await api('/reports/export?'+exportParams.toString(),{raw:true});const disposition=response.headers.get('content-disposition')||'',filename=disposition.match(/filename="?([^";]+)"?/i)?.[1]||'bao_cao_hoa_don.xlsx';await saveBlob(response,filename);await loadHistory()}catch(e){setError(e.message)}finally{setBusy(false)}}
+ async function exportNow(){setExporting(true);setError('');try{if(!summary?.invoice_count){setError('Không có hóa đơn phù hợp để xuất.');return}const response=await api(exportPath,{raw:true});const disposition=response.headers.get('content-disposition')||'',filename=disposition.match(/filename="?([^";]+)"?/i)?.[1]||'bao_cao_hoa_don.xlsx';await saveBlob(response,filename);await loadHistory()}catch(e){setError(e.message)}finally{setExporting(false)}}
  async function download(id){try{const response=await api(`/reports/history/${id}/download`,{raw:true});const row=history.find(x=>x.id===id);await saveBlob(response,row?.filename||'bao_cao.xlsx')}catch(e){setError(e.message)}}
  const items=pageData?.items||[];const total=pageData?.total||0;const stats=[['Tổng số hóa đơn',summary?.invoice_count??'—'],['Tổng tiền trước thuế',summary?.subtotal==null?'—':money(summary.subtotal)],['Tổng tiền thuế VAT',summary?.vat_amount==null?'—':money(summary.vat_amount)],['Tổng tiền thanh toán',summary?.total_amount==null?'—':money(summary.total_amount)]];
  const filterText=f=>Object.entries(f||{}).filter(([,v])=>v).map(([k,v])=>{const label={search:'Từ khóa',invoice_date_from:'Từ ngày',invoice_date_to:'Đến ngày',seller_name:'Nhà cung cấp',approval_status:'Phê duyệt',validation_status:'Kiểm tra',lookup_status:'Tra cứu',document_type:'Loại chứng từ'}[k]||k;const value=k==='document_type'?documentTypeName(v):['approval_status','validation_status','lookup_status'].includes(k)?approvalName(v):v;return `${label}: ${value}`}).join(' · ')||'Không lọc';
  return <><Title title="Báo cáo" description="Lọc, đối chiếu và xuất dữ liệu hóa đơn theo phạm vi được cấp quyền."/>
  <section className="panel report-panel-wide"><div className="panel-heading"><h3>Bộ lọc báo cáo</h3></div><div className="report-filters">
- <label>Tìm số hóa đơn hoặc nhà cung cấp<input value={filters.search} onChange={e=>change('search',e.target.value)} placeholder="Nhập từ khóa"/></label><label>Từ ngày<input type="date" value={filters.invoice_date_from} onChange={e=>change('invoice_date_from',e.target.value)}/></label><label>Đến ngày<input type="date" value={filters.invoice_date_to} onChange={e=>change('invoice_date_to',e.target.value)}/></label>
+ <label>Từ ngày<input type="date" value={filters.invoice_date_from} onChange={e=>change('invoice_date_from',e.target.value)}/></label><label>Đến ngày<input type="date" value={filters.invoice_date_to} onChange={e=>change('invoice_date_to',e.target.value)}/></label>
  <label>Nhà cung cấp<select value={filters.seller_name} onChange={e=>change('seller_name',e.target.value)}><option value="">Tất cả nhà cung cấp</option>{suppliers.map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Trạng thái phê duyệt<select value={filters.approval_status} onChange={e=>change('approval_status',e.target.value)}><option value="">Tất cả</option>{['draft','pending','approved','rejected'].map(x=><option key={x} value={x}>{approvalName(x)}</option>)}</select></label>
  <label>Trạng thái kiểm tra<select value={filters.validation_status} onChange={e=>change('validation_status',e.target.value)}><option value="">Tất cả</option>{['valid','needs_review','error'].map(x=><option key={x} value={x}>{approvalName(x)}</option>)}</select></label><label>Trạng thái tra cứu<select value={filters.lookup_status} onChange={e=>change('lookup_status',e.target.value)}><option value="">Tất cả</option>{['not_checked','verified','mismatch','not_found','not_applicable'].map(x=><option key={x} value={x}>{approvalName(x)}</option>)}</select></label><label>Loại chứng từ<select value={filters.document_type} onChange={e=>change('document_type',e.target.value)}><option value="">Tất cả</option>{['einvoice','bill','unknown'].map(x=><option key={x} value={x}>{documentTypeName(x)}</option>)}</select></label></div>
  <div className="quick-ranges">{[['today','Hôm nay'],['month','Tháng này'],['prev','Tháng trước'],['year','Năm nay']].map(([v,t])=><button key={v} className="btn btn-small btn-muted" onClick={()=>quickRange(v)}>{t}</button>)}</div><div className="report-actions"><button className="btn btn-secondary" disabled={busy} onClick={apply}><Filter size={16}/>Áp dụng bộ lọc</button><button className="btn btn-muted" onClick={reset}>Đặt lại bộ lọc</button></div></section>
- {busy&&!summary?<Loading/>:error?<p className="error" role="alert">{error}</p>:<><div className="report-kpis">{stats.map(([title,value])=><section className="kpi" key={title}><small>{title}</small><strong>{value}</strong></section>)}</div>
- <section className="panel report-panel-wide"><div className="panel-heading"><h3>Xem trước hóa đơn</h3><span>{total} hóa đơn phù hợp</span></div>{busy?<Loading/>:items.length===0?<Empty label="Không tìm thấy hóa đơn phù hợp"/>:<><div className="table-scroll"><table className="report-table"><thead><tr><th>STT</th><th>Số hóa đơn</th><th><button className="sort-button" onClick={()=>{setSortBy('date');setSortOrder(sortOrder==='desc'?'asc':'desc')}}>Ngày lập hóa đơn ↕</button></th><th>Nhà cung cấp</th><th>Mã số thuế</th><th>Tiền trước thuế</th><th>Thuế VAT</th><th><button className="sort-button" onClick={()=>{setSortBy('total');setSortOrder(sortOrder==='desc'?'asc':'desc')}}>Tổng thanh toán ↕</button></th><th>Trạng thái phê duyệt</th><th></th></tr></thead><tbody>{items.map((i,n)=><tr key={i.id}><td>{page*pageSize+n+1}</td><td><button className="textbtn" onClick={()=>navigate('/invoices/'+i.id)}>{i.invoice_number||'#'+i.id}</button></td><td>{datefmt(i.invoice_date)}</td><td>{i.seller_name||'Chưa trích xuất'}</td><td>{i.seller_tax_code||'—'}</td><td>{i.subtotal==null?'—':money(i.subtotal)}</td><td>{i.vat_amount==null?'—':money(i.vat_amount)}</td><td>{i.total_amount==null?'—':money(i.total_amount)}</td><td><Status value={i.approval_status}/></td><td><button className="btn btn-small btn-muted" onClick={()=>navigate('/invoices/'+i.id)}><Eye size={14}/>Chi tiết</button></td></tr>)}</tbody></table></div><div className="report-pagination"><span>Hiển thị {total? page*pageSize+1:0}–{Math.min((page+1)*pageSize,total)} / {total}</span><select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value));setPage(0)}}><option value={10}>10 dòng</option><option value={20}>20 dòng</option><option value={50}>50 dòng</option></select><button className="btn btn-small btn-muted" disabled={!page} onClick={()=>setPage(page-1)}>Trước</button><button className="btn btn-small btn-muted" disabled={(page+1)*pageSize>=total} onClick={()=>setPage(page+1)}>Sau</button><button className="btn btn-primary" disabled={busy||!total} onClick={exportNow}><Download size={16}/>Xuất Excel (.xlsx)</button></div></>}</section>
- <section className="panel report-panel-wide"><div className="panel-heading"><h3>Lịch sử xuất báo cáo</h3><span>{history.length} lần xuất gần đây</span></div>{history.length===0?<Empty label="Chưa có lịch sử xuất báo cáo"/>:<div className="table-scroll"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Điều kiện lọc</th><th>Số hóa đơn</th><th>Tổng giá trị</th><th>Trạng thái</th><th>Tải xuống</th></tr></thead><tbody>{history.map(h=><tr key={h.id}><td>{h.created_at?new Date(h.created_at).toLocaleString('vi-VN'):'—'}</td><td>{h.exported_by}</td><td>{filterText(h.filters)}</td><td>{h.row_count??'—'}</td><td>{h.total_amount==null?'—':money(h.total_amount)}</td><td><Status value={h.status}/></td><td><button className="textbtn" onClick={()=>download(h.id)}><Download size={15}/> Tải xuống</button></td></tr>)}</tbody></table></div>}</section></>}
+ <div className="report-kpis" aria-busy={busy}>{stats.map(([title,value])=><section className="kpi" key={title}><small>{title}</small><strong>{value}</strong></section>)}</div>
+ <section className="panel report-panel-wide"><div className="panel-heading"><h3>Xem trước hóa đơn</h3><span>{total} hóa đơn phù hợp</span></div>
+ <form className="report-search" onSubmit={e=>{e.preventDefault();applySearch(search)}}>
+   <input type="search" aria-label="Tìm hóa đơn" placeholder="Số hóa đơn, tên nhà cung cấp hoặc mã số thuế" value={search} onChange={e=>setSearch(e.target.value)}/>
+   <button type="submit" className="btn btn-secondary"><Search size={16}/>Tìm kiếm</button>
+   {(search||applied.search)&&<button type="button" className="btn btn-muted" onClick={()=>{setSearch('');applySearch('')}}>Xóa tìm kiếm</button>}
+ </form>
+ {busy?<Loading/>:queryError?<p className="error" role="alert">{queryError}</p>:items.length===0?<Empty label="Không tìm thấy hóa đơn phù hợp"/>:<><div className="table-scroll"><table className="report-table"><thead><tr><th>STT</th><th>Số hóa đơn</th><th><button className="sort-button" onClick={()=>{setSortBy('date');setSortOrder(sortOrder==='desc'?'asc':'desc')}}>Ngày lập hóa đơn ↕</button></th><th>Nhà cung cấp</th><th>Mã số thuế</th><th>Tiền trước thuế</th><th>Thuế VAT</th><th><button className="sort-button" onClick={()=>{setSortBy('total');setSortOrder(sortOrder==='desc'?'asc':'desc')}}>Tổng thanh toán ↕</button></th><th>Trạng thái phê duyệt</th><th></th></tr></thead><tbody>{items.map((i,n)=><tr key={i.id}><td>{page*pageSize+n+1}</td><td><button className="textbtn" onClick={()=>navigate('/invoices/'+i.id)}>{i.invoice_number||'#'+i.id}</button></td><td>{datefmt(i.invoice_date)}</td><td>{i.seller_name||'Chưa trích xuất'}</td><td>{i.seller_tax_code||'—'}</td><td>{i.subtotal==null?'—':money(i.subtotal)}</td><td>{i.vat_amount==null?'—':money(i.vat_amount)}</td><td>{i.total_amount==null?'—':money(i.total_amount)}</td><td><Status value={i.approval_status}/></td><td><button className="btn btn-small btn-muted" onClick={()=>navigate('/invoices/'+i.id)}><Eye size={14}/>Chi tiết</button></td></tr>)}</tbody></table></div><div className="report-pagination"><span>Hiển thị {total? page*pageSize+1:0}–{Math.min((page+1)*pageSize,total)} / {total}</span><select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value));setPage(0)}}><option value={10}>10 dòng</option><option value={20}>20 dòng</option><option value={50}>50 dòng</option></select><button className="btn btn-small btn-muted" disabled={!page} onClick={()=>setPage(page-1)}>Trước</button><button className="btn btn-small btn-muted" disabled={(page+1)*pageSize>=total} onClick={()=>setPage(page+1)}>Sau</button><button className="btn btn-primary" disabled={exporting||!total} onClick={exportNow}><Download size={16}/>Xuất Excel (.xlsx)</button></div></>}</section>
+ <section className="panel report-panel-wide"><div className="panel-heading"><h3>Lịch sử xuất báo cáo</h3><span>{history.length} lần xuất gần đây</span></div>{history.length===0?<Empty label="Chưa có lịch sử xuất báo cáo"/>:<div className="table-scroll"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Điều kiện lọc</th><th>Số hóa đơn</th><th>Tổng giá trị</th><th>Trạng thái</th><th>Tải xuống</th></tr></thead><tbody>{history.map(h=><tr key={h.id}><td>{h.created_at?new Date(h.created_at).toLocaleString('vi-VN'):'—'}</td><td>{h.exported_by}</td><td>{filterText(h.filters)}</td><td>{h.row_count??'—'}</td><td>{h.total_amount==null?'—':money(h.total_amount)}</td><td><Status value={h.status}/></td><td><button className="textbtn" onClick={()=>download(h.id)}><Download size={15}/> Tải xuống</button></td></tr>)}</tbody></table></div>}</section>
  <small className="report-note">Giá trị VAT chỉ được cộng từ dữ liệu VAT đã lưu; dữ liệu thiếu được hiển thị là chưa có.</small><Notice message={error} onDismiss={()=>setError('')}/></>}
 function UsersPage(){
  const {data,busy,error,reload}=useLoad('/users');
@@ -1691,7 +1754,7 @@ function NotificationsPage(){
 }
 const passwordRules=value=>value.length>=8&&/[A-Z]/.test(value)&&/[a-z]/.test(value)&&/\d/.test(value)&&/[^A-Za-z0-9]/.test(value);
 function ProfilePage({user,onRefresh}){
- const navigate=useNavigate();const {data:profile,reload:reloadProfile}=useLoad('/profile');const {data:invoices,busy,error,reload}=useLoad('/invoices?limit=250');
+ const {data:profile,reload:reloadProfile}=useLoad('/profile');
  const [modal,setModal]=useState(''),[message,setMessage]=useState(''),[saving,setSaving]=useState(false);const [form,setForm]=useState({full_name:user.full_name,phone:'',team:''}),[photo,setPhoto]=useState(null),[photoPreview,setPhotoPreview]=useState('');const [password,setPassword]=useState({current_password:'',new_password:'',confirm_password:''}),[visible,setVisible]=useState({});const current=profile||user;
  useEffect(()=>{if(profile)setForm({full_name:profile.full_name||'',phone:profile.phone||'',team:profile.team||''})},[profile]);
  function profileErrorMessage(error){const detail=error?.message||'';if(detail==="Mật khẩu hiện tại không đúng")return 'Mật khẩu hiện tại không đúng';if(/^(HTTP \d+|String should|Value error|Input should|Field required)/i.test(detail))return 'Không thể lưu thông tin. Vui lòng kiểm tra dữ liệu và thử lại.';return detail||'Đã xảy ra lỗi. Vui lòng thử lại.'}
@@ -1700,7 +1763,65 @@ function ProfilePage({user,onRefresh}){
  async function saveProfile(e){e.preventDefault();if(form.full_name.trim().length<2){setMessage('Họ và tên phải có ít nhất 2 ký tự');return}if(form.phone&&!/^[+()\-\d .]{7,30}$/.test(form.phone.trim())){setMessage('Vui lòng nhập số điện thoại hợp lệ');return}setSaving(true);setMessage('');try{if(photo){const body=new FormData();body.append('file',photo);await api('/profile/avatar',{method:'POST',body})}await api('/profile',{method:'PATCH',body:{full_name:form.full_name.trim(),phone:form.phone.trim()||null,team:form.team.trim()||null}});await Promise.all([onRefresh(),reloadProfile()]);setModal('');setMessage('Đã cập nhật hồ sơ thành công')}catch(e){setMessage(profileErrorMessage(e))}finally{setSaving(false)}}
  async function changePassword(e){e.preventDefault();setMessage('');if(password.new_password!==password.confirm_password){setMessage('Mật khẩu mới và xác nhận mật khẩu không khớp');return}if(!passwordRules(password.new_password)){setMessage('Mật khẩu cần có ít nhất 8 ký tự, gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt');return}setSaving(true);try{await api('/profile/password',{method:'PUT',body:{current_password:password.current_password,new_password:password.new_password}});setPassword({current_password:'',new_password:'',confirm_password:''});setModal('');setMessage('Đã đổi mật khẩu thành công')}catch(e){setMessage(profileErrorMessage(e))}finally{setSaving(false)}}
  function pwField(key,label){return <label className="password-field">{label}<span><input required minLength={key==='new_password'||key==='confirm_password'?8:undefined} type={visible[key]?'text':'password'} value={password[key]} onChange={e=>setPassword({...password,[key]:e.target.value})}/><button type="button" aria-label={visible[key]?'Ẩn mật khẩu':'Hiện mật khẩu'} onClick={()=>setVisible({...visible,[key]:!visible[key]})}>{visible[key]?<EyeOff size={19}/>:<Eye size={19}/>}</button></span></label>}
- return <><Title title="Hồ sơ cá nhân" description="Quản lý thông tin cá nhân và theo dõi các hóa đơn của bạn."/><div className="profile-overview"><section className="panel profile-identity"><ProfileAvatar user={current}/><button type="button" className="textbtn profile-photo-trigger" onClick={openEdit}><Camera size={15}/> Đổi ảnh đại diện</button><h2>{current.full_name}</h2><Pill><LockKeyhole size={13}/>{roleName(current.role)}</Pill><label className="profile-readonly-label">Địa chỉ email <LockKeyhole size={14}/></label><div className="profile-readonly">{current.email}</div></section><section className="panel profile-information"><div className="profile-section-heading"><h3>Thông tin cá nhân</h3>{current.employee_code&&<span>Mã nhân viên - {current.employee_code}</span>}</div><div className="profile-field"><label>Họ và tên</label><div>{current.full_name}</div></div><div className="profile-field-pair"><div className="profile-field"><label>Số điện thoại</label><div>{current.phone||'Chưa cập nhật'}</div></div><div className="profile-field"><label>Phòng ban</label><div>{current.team||'Chưa cập nhật'}</div></div></div><div className="profile-actions"><button className="btn btn-outline" onClick={openEdit}>Chỉnh sửa hồ sơ</button><button className="textbtn change-password-link" onClick={()=>{setPassword({current_password:'',new_password:'',confirm_password:''});setModal('password')}}><LockKeyhole size={17}/> Đổi mật khẩu</button><span className="readonly-badge"><LockKeyhole size={15}/> Chỉ xem</span></div></section></div><section className="panel receipts-panel"><div className="receipts-heading"><h3>{user.role==='employee'?'Hóa đơn đã gửi':'Hóa đơn trong hệ thống'}</h3><span>{Array.isArray(invoices)?invoices.length:0}</span></div>{busy?<Loading/>:error?<div className="profile-invoice-state"><p className="error">{error}</p><button className="btn btn-outline" onClick={reload}>Thử lại</button></div>:!invoices?.length?<Empty label="Chưa có hóa đơn"/>:<div className="receipt-grid">{invoices.map(item=><button className="receipt-card" key={item.id} onClick={()=>navigate('/invoices/'+item.id)}><span className="receipt-thumb"><InvoiceThumbnail invoice={item}/><span className="receipt-preview-action" aria-hidden="true"><Eye size={18}/><small>Xem chi tiết</small></span></span><span className="receipt-meta"><span>{datefmt(item.invoice_date||item.created_at)}</span><Status value={item.approval_status}/></span><strong>{item.seller_name||item.filename}</strong></button>)}</div>}</section>{modal&&<div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setModal('')}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title"><header><h2 id="profile-modal-title">{modal==='edit'?'Chỉnh sửa hồ sơ':'Đổi mật khẩu'}</h2><button className="iconbtn" aria-label="Đóng hộp thoại" onClick={()=>setModal('')}><X size={22}/></button></header>{modal==='edit'?<form onSubmit={saveProfile}><p className="modal-description">Cập nhật thông tin cá nhân. Vai trò và địa chỉ email không thể thay đổi.</p><div className="modal-avatar-row"><span className="profile-photo">{photoPreview?<img src={photoPreview} alt="Ảnh đại diện xem trước"/>:<ProfileAvatar user={current}/>}</span><div><label className="btn btn-outline photo-select">Đổi ảnh đại diện<input type="file" accept="image/jpeg,image/png" onChange={e=>choosePhoto(e.target.files?.[0])}/></label><small>Ảnh JPG hoặc PNG · Tối đa 5 MB</small></div></div><label className="modal-field">Họ và tên<input required minLength="2" maxLength="150" value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label><div className="modal-field-pair"><label className="modal-field">Số điện thoại<input type="tel" maxLength="30" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label className="modal-field">Phòng ban<input maxLength="120" value={form.team} onChange={e=>setForm({...form,team:e.target.value})}/></label></div><label className="modal-field readonly-input">Địa chỉ email <LockKeyhole size={14}/><input value={current.email} disabled/></label><label className="modal-field readonly-input">Vai trò <LockKeyhole size={14}/><input value={roleName(current.role)} disabled/></label><footer><button type="button" className="btn btn-outline" onClick={()=>setModal('')}>Hủy</button><button className="btn btn-primary" disabled={saving}>{saving?'Đang lưu...':'Lưu thay đổi'}</button></footer></form>:<form onSubmit={changePassword}><p className="modal-description">Hãy sử dụng mật khẩu riêng, an toàn và chưa dùng cho tài khoản khác.</p>{pwField('current_password','Mật khẩu hiện tại')}{pwField('new_password','Mật khẩu mới')}{pwField('confirm_password','Xác nhận mật khẩu mới')}<small className="password-hint">Mật khẩu cần có ít nhất 8 ký tự, gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.</small><footer><button type="button" className="btn btn-outline" onClick={()=>setModal('')}>Hủy</button><button className="btn btn-primary" disabled={saving}>{saving?'Đang lưu...':'Đổi mật khẩu'}</button></footer></form>}</section></div>}<Notice message={message} onDismiss={()=>setMessage('')}/></>}
+ return <><Title title="Hồ sơ cá nhân" description="Quản lý thông tin cá nhân và theo dõi các hóa đơn của bạn."/><div className="profile-overview"><section className="panel profile-identity"><ProfileAvatar user={current}/><button type="button" className="textbtn profile-photo-trigger" onClick={openEdit}><Camera size={15}/> Đổi ảnh đại diện</button><h2>{current.full_name}</h2><Pill><LockKeyhole size={13}/>{roleName(current.role)}</Pill><label className="profile-readonly-label">Địa chỉ email <LockKeyhole size={14}/></label><div className="profile-readonly">{current.email}</div></section><section className="panel profile-information"><div className="profile-section-heading"><h3>Thông tin cá nhân</h3>{current.employee_code&&<span>Mã nhân viên - {current.employee_code}</span>}</div><div className="profile-field"><label>Họ và tên</label><div>{current.full_name}</div></div><div className="profile-field-pair"><div className="profile-field"><label>Số điện thoại</label><div>{current.phone||'Chưa cập nhật'}</div></div><div className="profile-field"><label>Phòng ban</label><div>{current.team||'Chưa cập nhật'}</div></div></div><div className="profile-actions"><button className="btn btn-outline" onClick={openEdit}>Chỉnh sửa hồ sơ</button><button className="textbtn change-password-link" onClick={()=>{setPassword({current_password:'',new_password:'',confirm_password:''});setModal('password')}}><LockKeyhole size={17}/> Đổi mật khẩu</button><span className="readonly-badge"><LockKeyhole size={15}/> Chỉ xem</span></div></section></div><ProfileInvoices key={user.id}/>{modal&&<div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setModal('')}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title"><header><h2 id="profile-modal-title">{modal==='edit'?'Chỉnh sửa hồ sơ':'Đổi mật khẩu'}</h2><button className="iconbtn" aria-label="Đóng hộp thoại" onClick={()=>setModal('')}><X size={22}/></button></header>{modal==='edit'?<form onSubmit={saveProfile}><p className="modal-description">Cập nhật thông tin cá nhân. Vai trò và địa chỉ email không thể thay đổi.</p><div className="modal-avatar-row"><span className="profile-photo">{photoPreview?<img src={photoPreview} alt="Ảnh đại diện xem trước"/>:<ProfileAvatar user={current}/>}</span><div><label className="btn btn-outline photo-select">Đổi ảnh đại diện<input type="file" accept="image/jpeg,image/png" onChange={e=>choosePhoto(e.target.files?.[0])}/></label><small>Ảnh JPG hoặc PNG · Tối đa 5 MB</small></div></div><label className="modal-field">Họ và tên<input required minLength="2" maxLength="150" value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label><div className="modal-field-pair"><label className="modal-field">Số điện thoại<input type="tel" maxLength="30" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label className="modal-field">Phòng ban<input maxLength="120" value={form.team} onChange={e=>setForm({...form,team:e.target.value})}/></label></div><label className="modal-field readonly-input">Địa chỉ email <LockKeyhole size={14}/><input value={current.email} disabled/></label><label className="modal-field readonly-input">Vai trò <LockKeyhole size={14}/><input value={roleName(current.role)} disabled/></label><footer><button type="button" className="btn btn-outline" onClick={()=>setModal('')}>Hủy</button><button className="btn btn-primary" disabled={saving}>{saving?'Đang lưu...':'Lưu thay đổi'}</button></footer></form>:<form onSubmit={changePassword}><p className="modal-description">Hãy sử dụng mật khẩu riêng, an toàn và chưa dùng cho tài khoản khác.</p>{pwField('current_password','Mật khẩu hiện tại')}{pwField('new_password','Mật khẩu mới')}{pwField('confirm_password','Xác nhận mật khẩu mới')}<small className="password-hint">Mật khẩu cần có ít nhất 8 ký tự, gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.</small><footer><button type="button" className="btn btn-outline" onClick={()=>setModal('')}>Hủy</button><button className="btn btn-primary" disabled={saving}>{saving?'Đang lưu...':'Đổi mật khẩu'}</button></footer></form>}</section></div>}<Notice message={message} onDismiss={()=>setMessage('')}/></>}
+function ProfileInvoices(){
+ const navigate=useNavigate();
+ const [draft,setDraft]=useState(emptyProfileInvoiceRange);
+ const [range,setRange]=useState(emptyProfileInvoiceRange);
+ const [page,setPage]=useState(0);
+ const [validation,setValidation]=useState('');
+ const limit=20;
+ const {data,busy,error,reload}=useLoad(profileInvoiceQuery(range,page,limit));
+ const pages=Math.ceil((data?.total||0)/limit);
+ function apply(e){
+   e.preventDefault();
+   if(draft.from&&draft.to&&draft.from>draft.to){
+     setValidation('Từ ngày không được sau Đến ngày.');
+     return;
+   }
+   setValidation('');
+   if(page===0&&range.from===draft.from&&range.to===draft.to)reload();
+   setRange(draft);
+   setPage(0);
+ }
+ function clear(){
+   setDraft(emptyProfileInvoiceRange);
+   setRange(emptyProfileInvoiceRange);
+   setPage(0);
+   setValidation('');
+ }
+ function change(field,value){
+   setDraft(previous=>({...previous,[field]:value}));
+   setValidation('');
+ }
+ return <section className="panel receipts-panel">
+   <div className="receipts-heading">
+     <h3>Hóa đơn cá nhân</h3>
+     {!busy&&!error&&data&&<span role="status">{data.total} hóa đơn</span>}
+   </div>
+   <form className="profile-invoice-filter" onSubmit={apply}>
+     <label>Từ ngày<input type="date" min="0001-01-01" max="9999-12-31" value={draft.from} onChange={e=>change('from',e.target.value)}/></label>
+     <label>Đến ngày<input type="date" min="0001-01-01" max="9999-12-31" value={draft.to} onChange={e=>change('to',e.target.value)}/></label>
+     <button type="submit" className="btn btn-primary">Lọc hóa đơn</button>
+     <button type="button" className="btn btn-outline" onClick={clear}>Xóa bộ lọc</button>
+   </form>
+   {validation&&<p className="error" role="alert">{validation}</p>}
+   <div aria-busy={busy}>
+     {busy?<div role="status"><Loading/></div>:error?
+       <div className="profile-invoice-state"><p className="error" role="alert">Không thể tải hóa đơn. Vui lòng thử lại.</p><button type="button" className="btn btn-outline" onClick={reload}>Thử lại</button></div>:
+       <>
+         {!data?.items.length&&<Empty label={data?.total?'Không có hóa đơn trên trang này':range.from||range.to?'Không có hóa đơn trong khoảng ngày đã chọn':'Chưa có hóa đơn cá nhân'}/>}
+         {!!data?.items.length&&<div className="receipt-grid">{data.items.map(item=><button className="receipt-card" key={item.id} onClick={()=>navigate('/invoices/'+item.id)}><span className="receipt-thumb"><InvoiceThumbnail invoice={item}/><span className="receipt-preview-action" aria-hidden="true"><Eye size={18}/><small>Xem chi tiết</small></span></span><span className="receipt-meta"><span>{item.invoice_date?item.invoice_date.split('-').reverse().join('/'):'Chưa có ngày phát hành'}</span><Status value={item.approval_status}/></span><strong>{item.seller_name||item.filename}</strong></button>)}</div>}
+         {(pages>1||page>0)&&<nav className="profile-invoice-pagination" aria-label="Phân trang hóa đơn">
+           <button type="button" className="btn btn-outline" disabled={page===0} onClick={()=>setPage(page-1)}>Trang trước</button>
+           <span>Trang {page+1} / {Math.max(pages,page+1)}</span>
+           <button type="button" className="btn btn-outline" disabled={page+1>=pages} onClick={()=>setPage(page+1)}>Trang sau</button>
+         </nav>}
+       </>
+     }
+   </div>
+ </section>;
+}
 function InvoiceThumbnail({invoice}){const[src,setSrc]=useState(''),[kind,setKind]=useState('loading');useEffect(()=>{let active=true,objectUrl='';setSrc('');setKind('loading');api(`/invoices/${invoice.id}/thumbnail`,{raw:true}).then(async response=>{const type=response.headers.get('content-type')||'';if(type.includes('application/json')){const result=await response.json();if(active)setKind(result.kind==='xml'?'xml':'default');return}if(!type.startsWith('image/'))throw new Error('Không thể tải ảnh xem trước');const blob=await response.blob();objectUrl=URL.createObjectURL(blob);if(active){setSrc(objectUrl);setKind('image')}else URL.revokeObjectURL(objectUrl)}).catch(()=>{if(active)setKind('default')});return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)}},[invoice.id]);if(kind==='loading')return <span className="receipt-thumb-loading" role="status" aria-label="Đang tải ảnh xem trước"><RefreshCw size={20} className="spin"/></span>;if(kind==='image')return <img src={src} alt={`Hóa đơn ${invoice.filename||invoice.id}`}/>;if(kind==='xml')return <span className="receipt-document receipt-xml"><FileCode2 size={38}/><small>Tệp XML</small></span>;return <span className="receipt-document"><FileText size={34}/><small>{invoice.filename?.split('.').pop()?.toUpperCase()||'TỆP'}</small></span>}
 
 function auditActionLabel(action){return ({'invoice.uploaded':'Tải hóa đơn lên','invoice.submitted':'Gửi hóa đơn phê duyệt','invoice.approved':'Phê duyệt hóa đơn','invoice.rejected':'Từ chối hóa đơn','schedule.created':'Tạo lịch công tác','schedule.updated':'Cập nhật lịch công tác','user.created':'Tạo người dùng','user.updated':'Cập nhật người dùng'})[action]||action}

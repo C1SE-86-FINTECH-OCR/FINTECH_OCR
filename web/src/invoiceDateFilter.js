@@ -1,3 +1,12 @@
+export const emptyProfileInvoiceRange = {from: '', to: ''};
+
+export function profileInvoiceQuery(range, page, limit) {
+  const params = new URLSearchParams({limit, offset: page * limit});
+  if (range.from) params.set('invoice_date_from', range.from);
+  if (range.to) params.set('invoice_date_to', range.to);
+  return '/profile/invoices?' + params;
+}
+
 export function invoiceDateRange(period, value, quarter = '1') {
   if (!value || !['day', 'month', 'quarter', 'year'].includes(period)) return {};
   if (period === 'day') {
