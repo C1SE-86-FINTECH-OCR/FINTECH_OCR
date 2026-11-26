@@ -21,7 +21,7 @@ export function notificationTypeLabel(type) {
     invoice_submitted: 'Đã gửi hóa đơn',
     invoice_decision: 'Kết quả phê duyệt',
     invoice_message: 'Tin nhắn hóa đơn',
-    direct_message: 'Tin nhắn nhân viên',
+    direct_message: 'Tin nhắn',
     schedule_assigned: 'Được giao lịch công tác',
     legacy: 'Thông báo chung',
   })[type] || type || 'Thông báo chung';
