@@ -59,9 +59,10 @@ export function formatDashboardMonth(value) {
 
 export function formatDashboardMonthTick(value) {
   const date = monthDate(value);
-  return date ? new Intl.DateTimeFormat('vi-VN', {
-    timeZone: 'UTC', month: '2-digit', year: '2-digit',
-  }).format(date) : '';
+  if (!date) return '';
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const y = String(date.getUTCFullYear()).slice(-2);
+  return `T${m}/${y}`;
 }
 
 export function formatVnd(value) {

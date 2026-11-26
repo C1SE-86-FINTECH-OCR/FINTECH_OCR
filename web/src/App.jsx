@@ -1,7 +1,7 @@
 import BrandLogo,{BrandMark} from './BrandLogo.jsx';
 import InvoiceDateFilter from './InvoiceDateFilter.jsx';
 import {invoiceDateRange} from './invoiceDateFilter.js';
-import React,{createContext,useContext,useRef,useState,useEffect,useCallback} from 'react';
+import React,{createContext,useContext,useRef,useState,useEffect,useCallback,useMemo} from 'react';
 import {Routes,Route,NavLink,Navigate,useNavigate,useParams,useLocation,useSearchParams} from 'react-router-dom';
 import {Home,FileUp,ClipboardCheck,CalendarDays,MessageSquare,ChartNoAxesCombined,Users,LogOut,Bell,UserCircle,Search,ArrowRight,Plus,FileText,CheckCircle2,XCircle,Clock3,RefreshCw,Download,ShieldCheck,Menu,X,Eye,EyeOff,Save,Send,Square,ChevronLeft,ExternalLink,BarChart3,Trophy,Activity,AlertTriangle,Filter,Settings,Camera,ChevronDown,LockKeyhole,FileCode2,ScanText,Pencil,UserRoundX,UserRoundCheck,Trash2,Sparkles,ThumbsUp,ThumbsDown,Copy,Check,ArrowUp,Lock,Bookmark,Globe} from 'lucide-react';
 import {api,authStore,money,datefmt,roleName,approvalName,documentTypeName,ROOT} from './api';
@@ -84,9 +84,9 @@ return <div className="login-wrap"><div className="login-aside"><div className="
       </React.Fragment>
     ))}
   </div>
-</div></div><div className="login-chips"><span>OCR có AI hỗ trợ</span><span>Quy trình phê duyệt</span><span>Phân tích tài chính</span></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
+</div></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
 const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
-function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký kiểm toán",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/messages',"Tin nhắn nhân viên",MessageSquare],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký hoạt động",ShieldCheck],['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
@@ -1438,7 +1438,7 @@ function UsersPage(){
  }
  async function perform(){if(saving||!confirm)return;if(confirm.action==='toggle'){await toggleAccount(confirm.user);return}setSaving(true);try{await api('/users/'+confirm.user.id,confirm.action==='delete'?{method:'DELETE'}:{method:'PATCH',body:{status:confirm.user.status==='active'?'disabled':'active'}});setConfirm(null);reload();setMessage(confirm.action==='delete'?'Đã xóa hoàn toàn tài khoản':'Đã cập nhật tài khoản')}catch(e){setMessage(e.message)}finally{setSaving(false)}}
  const active=(data||[]).filter(u=>u.status==='active').length;
- const permissions={employee:'Tải hóa đơn cá nhân, xem và tự điều chỉnh lịch công tác của mình, trò chuyện với AI. Không có quyền phê duyệt hoặc quản lý người dùng.',accountant:'Kiểm tra hóa đơn, phê duyệt chi phí, xem lịch công tác và xem báo cáo.',admin:'Quản lý người dùng, phân quyền, phân và điều chỉnh lịch công tác, hóa đơn và lịch sử kiểm toán.'};
+ const permissions={employee:'Tải hóa đơn cá nhân, xem và tự điều chỉnh lịch công tác của mình, trò chuyện với AI. Không có quyền phê duyệt hoặc quản lý người dùng.',accountant:'Kiểm tra hóa đơn, phê duyệt chi phí, xem lịch công tác và xem báo cáo.',admin:'Quản lý người dùng, phân quyền, phân và điều chỉnh lịch công tác, hóa đơn và nhật ký hoạt động.'};
  const actionLabel=confirm?.action==='delete'?'Xóa tài khoản':confirm?.user.status==='active'?'Vô hiệu hóa tài khoản':'Kích hoạt lại tài khoản';
  return <div className="users-page"><Title title="Quản lý người dùng" description="Quản lý quyền truy cập, vai trò và trạng thái tài khoản. Lịch sử tài khoản được lưu giữ."/>
  <div className={'users-layout '+(!form?'form-closed':'')}><div className="users-main"><section className="panel users-table-panel"><div className="panel-heading"><h3>Danh sách người dùng <span className="users-count">{data?.length||0}</span></h3><small>{active} đang hoạt động · {(data?.length||0)-active} đã vô hiệu hóa</small></div><div className="filters users-filters"><label className="searchbox"><Search size={15}/><input aria-label="Tìm người dùng" placeholder="Tìm theo tên hoặc email" value={search} onChange={e=>setSearch(e.target.value)}/></label><select aria-label="Lọc vai trò" value={role} onChange={e=>setRole(e.target.value)}><option value="">Tất cả vai trò</option>{['employee','accountant','admin'].map(r=><option key={r} value={r}>{roleName(r)}</option>)}</select><button className="btn btn-primary" onClick={()=>edit(null)}><Plus size={15}/> Thêm người dùng</button></div>
@@ -1666,7 +1666,82 @@ function InvoiceThumbnail({invoice}){const[src,setSrc]=useState(''),[kind,setKin
 
 function auditActionLabel(action){return ({'invoice.uploaded':'Tải hóa đơn lên','invoice.submitted':'Gửi hóa đơn phê duyệt','invoice.approved':'Phê duyệt hóa đơn','invoice.rejected':'Từ chối hóa đơn','schedule.created':'Tạo lịch công tác','schedule.updated':'Cập nhật lịch công tác','user.created':'Tạo người dùng','user.updated':'Cập nhật người dùng'})[action]||action}
 function auditEntityLabel(entity){return ({invoice:'Hóa đơn',schedule:'Lịch công tác',user:'Tài khoản'})[entity]||entity}
-function AuditPage(){const{data}=useLoad('/audit-logs');return <><Title title="Nhật ký kiểm toán" description="Theo dõi hoạt động bảo mật và quy trình trong hệ thống."/><section className="panel"><div className="table-scroll"><table><thead><tr><th>Sự kiện</th><th>Loại</th><th>Đối tượng</th><th>Mã người thực hiện</th><th>Thời gian</th></tr></thead><tbody>{(data||[]).map(a=><tr key={a.id}><td><strong>{auditActionLabel(a.action)}</strong></td><td>{auditEntityLabel(a.entity_type)}</td><td>#{a.entity_id||'—'}</td><td>{a.actor_id||'—'}</td><td>{datefmt(a.created_at)}</td></tr>)}</tbody></table>{!data?.length&&<Empty/>}</div></section></>}
+function AuditPage(){
+  const [period, setPeriod] = useState('');
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const thisMonthStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const thisYearStr = String(now.getFullYear());
+  const [dateVal, setDateVal] = useState(todayStr);
+
+  const queryPath = useMemo(() => {
+    if (!period) return '/audit-logs';
+    if (period === 'day') return `/audit-logs?day=${dateVal}`;
+    if (period === 'month') return `/audit-logs?month=${dateVal.slice(0, 7)}`;
+    if (period === 'year') return `/audit-logs?year=${dateVal.slice(0, 4)}`;
+    return '/audit-logs';
+  }, [period, dateVal]);
+
+  const {data, busy, error, reload} = useLoad(queryPath);
+
+  function selectPeriod(mode) {
+    setPeriod(mode);
+    if (mode === 'day') setDateVal(todayStr);
+    else if (mode === 'month') setDateVal(thisMonthStr);
+    else if (mode === 'year') setDateVal(thisYearStr);
+    else setDateVal('');
+  }
+
+  return <>
+    <Title title="Nhật ký hoạt động" description="Theo dõi hoạt động bảo mật và quy trình trong hệ thống."/>
+    <section className="panel">
+      <div className="panel-heading" style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'12px',marginBottom:'16px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+          <span style={{fontWeight:600,display:'flex',alignItems:'center',gap:'6px'}}><CalendarDays size={16}/> Lọc thời gian:</span>
+          <div className="btn-group" role="group" aria-label="Kiểu lọc thời gian" style={{display:'inline-flex',gap:'4px'}}>
+            <button type="button" className={`btn ${period===''?'btn-primary':'btn-outline'}`} onClick={()=>selectPeriod('')}>Tất cả</button>
+            <button type="button" className={`btn ${period==='day'?'btn-primary':'btn-outline'}`} onClick={()=>selectPeriod('day')}>Ngày</button>
+            <button type="button" className={`btn ${period==='month'?'btn-primary':'btn-outline'}`} onClick={()=>selectPeriod('month')}>Tháng</button>
+            <button type="button" className={`btn ${period==='year'?'btn-primary':'btn-outline'}`} onClick={()=>selectPeriod('year')}>Năm</button>
+          </div>
+          {period==='day'&&<input type="date" className="filter-input" style={{padding:'6px 10px',borderRadius:'8px',border:'1px solid #cbd5e1'}} value={dateVal} onChange={e=>setDateVal(e.target.value)}/>}
+          {period==='month'&&<input type="month" className="filter-input" style={{padding:'6px 10px',borderRadius:'8px',border:'1px solid #cbd5e1'}} value={dateVal.slice(0,7)} onChange={e=>setDateVal(e.target.value)}/>}
+          {period==='year'&&<select className="filter-input" style={{padding:'6px 10px',borderRadius:'8px',border:'1px solid #cbd5e1'}} value={dateVal.slice(0,4)} onChange={e=>setDateVal(e.target.value)}>
+            {Array.from({length:10},(_,i)=>now.getFullYear()+1-i).map(y=><option key={y} value={y}>{y}</option>)}
+          </select>}
+          {period&&<button type="button" className="btn btn-outline" style={{display:'inline-flex',alignItems:'center',gap:'4px'}} onClick={()=>selectPeriod('')}><X size={14}/> Xóa lọc</button>}
+        </div>
+        <small style={{color:'#64748b'}}>Hiển thị {data?.length||0} bản ghi</small>
+      </div>
+      {busy?<Loading/>:error?<div className="profile-invoice-state"><p className="error">{error}</p><button className="btn btn-outline" onClick={reload}>Thử lại</button></div>:<div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Sự kiện</th>
+              <th>Loại</th>
+              <th>Đối tượng</th>
+              <th>Tên người dùng</th>
+              <th>Mã người thực hiện</th>
+              <th>Thời gian</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data||[]).map(a=><tr key={a.id}>
+              <td><strong>{auditActionLabel(a.action)}</strong></td>
+              <td>{auditEntityLabel(a.entity_type)}</td>
+              <td>#{a.entity_id||'—'}</td>
+              <td>{a.actor_name||'Không xác định'}</td>
+              <td>{a.actor_id||'—'}</td>
+              <td>{datefmt(a.created_at)}</td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!data?.length&&<Empty label="Không có nhật ký phù hợp"/>}
+      </div>}
+    </section>
+  </>
+}
 export default function App(){
   const[user,setUser]=useState(null),[loading,setLoading]=useState(!!authStore.get());
   const refresh=useCallback(async()=>{let u=await api('/auth/me');setUser(u)},[]);

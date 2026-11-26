@@ -8,12 +8,37 @@ from .models import *
 from .extraction import validate
 import hashlib
 
+def seed_accountant_schedules(db):
+    accountant = db.scalar(select(User).where(User.email == 'accountant@fintech.local'))
+    admin = db.scalar(select(User).where(User.email == 'admin@fintech.local'))
+    if not accountant or not admin:
+        return 0
+    items = [
+        ('Kiểm toán chi nhánh miền Trung', 'Đà Nẵng', datetime(2026, 12, 7, 8, 30, tzinfo=timezone.utc), datetime(2026, 12, 9, 17, 30, tzinfo=timezone.utc), 'planned'),
+        ('Quyết toán thuế và đối soát tài chính cuối năm', 'Hà Nội', datetime(2026, 12, 14, 8, 0, tzinfo=timezone.utc), datetime(2026, 12, 16, 17, 0, tzinfo=timezone.utc), 'planned'),
+        ('Tập huấn chuẩn mực kế toán tài chính mới', 'TP. Hồ Chí Minh', datetime(2026, 12, 21, 9, 0, tzinfo=timezone.utc), datetime(2026, 12, 23, 16, 0, tzinfo=timezone.utc), 'in_progress'),
+    ]
+    added = 0
+    for title, dest, starts_at, ends_at, status in items:
+        exists = db.scalar(select(Schedule.id).where(Schedule.assigned_to == accountant.id, Schedule.title == title, Schedule.starts_at == starts_at).limit(1))
+        if not exists:
+            db.add(Schedule(title=title, destination=dest, starts_at=starts_at, ends_at=ends_at, assigned_to=accountant.id, created_by=admin.id, status=status))
+            added += 1
+    if added:
+        db.commit()
+    return added
+
 def main():
     if settings.app_env!='development':raise SystemExit('Demo seeding is disabled outside development')
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
         if db.scalar(select(User.id).limit(1)):
-            print('Database already contains users; seed skipped.');return
+            added = seed_accountant_schedules(db)
+            if added:
+                print(f'Database already contains users. Seeded {added} missing accountant schedules for Dec 2026.')
+            else:
+                print('Database already contains users; demo data and accountant schedules already up to date.')
+            return
         credentials=[('Quang Tú','admin@fintech.local','admin'),('Minh Anh','accountant@fintech.local','accountant'),('Trần Lan Hương','employee@fintech.local','employee'),('Ngô Đức Duy','duy@fintech.local','employee'),('Phạm Thu Hà','ha@fintech.local','employee')]
         users=[]
         for name,email,role in credentials:
@@ -43,6 +68,7 @@ def main():
             for j in range(3):
                 status='completed' if j<idx+1 else 'planned'
                 db.add(Schedule(title=['Gặp đối tác','Khảo sát chi nhánh','Họp công tác'][j],destination=['Hà Nội','Đà Nẵng','Hồ Chí Minh'][j],starts_at=base+timedelta(days=j*6),ends_at=base+timedelta(days=j*6,hours=4),assigned_to=user.id,created_by=users[1].id,status=status,completed_at=base if status=='completed' else None))
+        seed_accountant_schedules(db)
         db.commit()
         print('Seeded:',len(users),'accounts,',len(samples),'sample invoices, schedules and notifications.')
         print('All demo accounts use password: Password@123 (DEVELOPMENT ONLY)')
