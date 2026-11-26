@@ -39,7 +39,7 @@ export default function SpendingChart({ summary }) {
     </div>
     {hasRecentSpending ? <div className="chart">
       <ResponsiveContainer>
-        <AreaChart data={monthly}>
+        <AreaChart data={monthly} margin={{ top: 10, right: 24, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="monthly-spending-fill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#a8bfea" stopOpacity=".7"/>
