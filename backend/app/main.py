@@ -4,7 +4,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 from collections import defaultdict
 from math import isfinite
 import hashlib, re, json, unicodedata, time
@@ -30,6 +30,7 @@ from .extraction import text_from_file,extract_fields,extract_line_items,validat
 from .risk_checks import assess_invoice_risks
 from . import gemini_chat
 from . import chatbot_queries
+from .travel_advances import router as travel_advance_router
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +41,10 @@ async def lifespan(app):
     # issue DDL against either the main or isolated PostgreSQL database.
     if settings.app_env == 'development' and settings.database_url.startswith('sqlite'):
         Base.metadata.create_all(bind=engine)
-        try:
-            from .seed import seed_accountant_schedules
-            with SessionLocal() as db:
-                seed_accountant_schedules(db)
-        except Exception as e:
-            logger.warning('Auto-seed accountant schedules skipped: %s', e)
     storage_dir()
     yield
 app=FastAPI(title='FINTECH OCR API',version='0.1.0',lifespan=lifespan,description='API bản MVP của C1SE.86; AI provider và tra cứu thuế tự động chưa tích hợp')
+app.include_router(travel_advance_router)
 app.add_middleware(CORSMiddleware,allow_origins=[s.strip() for s in settings.cors_origins.split(',')],allow_methods=['*'],allow_headers=['*'],allow_credentials=True)
 
 _OPTIONAL_PHASE2_COLUMNS={
@@ -255,6 +251,11 @@ class ChatInput(BaseModel):
     question:str=Field(default='',max_length=1000)
     conversation_id:int|None=Field(default=None,gt=0)
     image_base64:str|None=None
+    request_id:UUID|None=None
+
+class ConversationTitle(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
 class ProfileEdit(BaseModel):
     full_name:str=Field(min_length=2,max_length=150)
     phone:str|None=Field(default=None,max_length=30)
@@ -370,6 +371,7 @@ def delete_user(user_id:int,db:Session=Depends(db_session),user=Depends(require_
         # and audit events without retaining a reference to a deleted identity.
         conversations=select(Conversation.id).where(Conversation.user_id==user_id)
         chat_ids=select(ChatMessage.id).where(ChatMessage.conversation_id.in_(conversations))
+        remove(ChatTurn,ChatTurn.user_id==user_id)
         remove(ChatMessageSource,ChatMessageSource.message_id.in_(chat_ids))
         remove(ChatMessage,ChatMessage.conversation_id.in_(conversations))
         remove(Conversation,Conversation.user_id==user_id)
@@ -1095,13 +1097,20 @@ def ranking_date(db):
     return ranking_local_time(db, func.coalesce(Schedule.completed_at, Schedule.ends_at))
 
 
+def ranking_real_schedule():
+    return ~select(AuditLog.id).where(
+        AuditLog.entity_type == 'schedule', AuditLog.entity_id == Schedule.id,
+        AuditLog.action == 'schedule.demo_seeded',
+    ).exists()
+
+
 @app.get('/api/v1/ranking/years')
 def ranking_years(db: Session = Depends(db_session), user=Depends(current_user)):
     current_year = datetime.now(ZoneInfo(RANKING_TIMEZONE)).year
     first_start, first_completion = db.execute(select(
         func.min(func.extract('year', ranking_local_time(db, Schedule.starts_at))),
         func.min(func.extract('year', ranking_date(db))),
-    )).one()
+    ).where(ranking_real_schedule())).one()
     earliest = min((int(year) for year in (first_start, first_completion) if year is not None), default=current_year)
     # Offer past years even for installations with no historical schedules.
     first_year = earliest if earliest < current_year else max(1, current_year - 5)
@@ -1111,42 +1120,56 @@ def ranking_years(db: Session = Depends(db_session), user=Depends(current_user))
 
 @app.get('/api/v1/ranking')
 def ranking(
-    period: str = Query('all', pattern='^(all|month|quarter|year)$'),
+    period: str = Query('all', pattern='^(all|month|quarter|year|custom)$'),
     db: Session = Depends(db_session),
     user=Depends(current_user),
     *,
     year: int | None = None,
+    month: int | None = None,
+    quarter: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_totals: bool = False,
 ):
-    if year is not None and not 1 <= year <= 9999:
-        fail('Năm không hợp lệ', 422)
-    completed = func.count(Schedule.id)
+    today = datetime.now(ZoneInfo(RANKING_TIMEZONE)).date()
+    selected_year = year if year is not None else today.year
+    if not 1 <= selected_year <= 9999 or (month is not None and not 1 <= month <= 12) or (quarter is not None and not 1 <= quarter <= 4):
+        fail('Kỳ công tác không hợp lệ', 422)
+    if period == 'custom' and (not date_from or not date_to or date_from > date_to):
+        fail('Khoảng ngày không hợp lệ', 422)
+
+    local_date = ranking_date(db)
+    completed = func.count(Schedule.id).filter(Schedule.status == 'completed')
     query = (
-        select(User.id, User.full_name, completed)
+        select(User.id, User.full_name, completed, func.count(Schedule.id))
         .join(Schedule, Schedule.assigned_to == User.id)
-        .where(Schedule.status == 'completed')
+        .where(Schedule.status != 'cancelled', ranking_real_schedule())
         .group_by(User.id, User.full_name)
         .order_by(completed.desc(), User.id)
     )
-    if year is not None or period != 'all':
-        local_date = ranking_date(db)
-        today = datetime.now(ZoneInfo(RANKING_TIMEZONE))
-        query = query.where(func.extract('year', local_date) == (year if year is not None else today.year))
-        if year is None and period in ('month', 'quarter'):
-            month = func.extract('month', local_date)
-            if period == 'month':
-                query = query.where(month == today.month)
-            else:
-                first_month = ((today.month - 1) // 3) * 3 + 1
-                query = query.where(month.between(first_month, first_month + 2))
+    if not include_totals:
+        query = query.having(completed > 0)
+    if period == 'custom':
+        day = func.date(local_date)
+        query = query.where(day.between(date_from, date_to))
+    elif year is not None or period != 'all':
+        query = query.where(func.extract('year', local_date) == selected_year)
+        local_month = func.extract('month', local_date)
+        if period == 'month':
+            query = query.where(local_month == (month or today.month))
+        elif period == 'quarter':
+            first_month = ((quarter or ((today.month - 1) // 3 + 1)) - 1) * 3 + 1
+            query = query.where(local_month.between(first_month, first_month + 2))
     rows = []
     previous_count = None
     rank = 0
-    for position, (user_id, full_name, count) in enumerate(db.execute(query), start=1):
+    for position, (user_id, full_name, count, total) in enumerate(db.execute(query), start=1):
         if count != previous_count:
             rank = position
             previous_count = count
-        rows.append({'user_id': user_id, 'full_name': full_name, 'completed': count, 'rank': rank})
+        rows.append({'user_id': user_id, 'full_name': full_name, 'completed': count, 'total': total, 'rank': rank if count else None})
     return rows
+
 def _report_invoice_query(db,user,approval_status='',validation_status='',document_type='',search='',invoice_date_from=None,invoice_date_to=None,seller_name='',lookup_status=''):
     q=invoice_q(db,user)
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
@@ -1360,6 +1383,14 @@ def audit_logs(
         for a, actor_name in rows
     ]
 IMAGE_PREFIX = "[IMAGE_ATTACHED:"
+GOOGLE_API_KEY = re.compile(r'(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])')
+
+
+def redact_chat_secrets(content):
+    content = GOOGLE_API_KEY.sub('[Đã ẩn khóa API]', content)
+    if settings.gemini_api_key:
+        content = content.replace(settings.gemini_api_key, '[Đã ẩn khóa API]')
+    return content
 
 def parse_image_data(image_data: str | None) -> tuple[bytes | None, str]:
     if not image_data:
@@ -1382,6 +1413,52 @@ SECURITY_REFUSAL = (
     'Trợ lý AI không được phép tiết lộ mã khóa API, thông tin xác thực, câu lệnh nội bộ hoặc dữ liệu nhạy cảm.'
 )
 
+def owned_conversation(db, user_id, conv_id, *, lock=False):
+    query = select(Conversation).where(Conversation.id == conv_id, Conversation.user_id == user_id)
+    conversation = db.scalar(query.with_for_update() if lock else query)
+    if not conversation:
+        fail('Không tìm thấy cuộc trò chuyện', 404)
+    return conversation
+
+
+def saved_chat_turn(db, user_id, body):
+    turn = db.get(ChatTurn, (user_id, str(body.request_id))) if body.request_id else None
+    if not turn:
+        return None
+    if body.conversation_id and body.conversation_id != turn.conversation_id:
+        fail('Mã yêu cầu đã được dùng cho cuộc trò chuyện khác', 409)
+    return turn.conversation_id, db.get(ChatMessage, turn.answer_id).content
+
+
+def save_chat_turn(db, user_id, body, conv_id, question, answer, *, image_attachment=None):
+    # Serialize retries from different devices before inserting either message.
+    if body.request_id:
+        db.scalar(select(User.id).where(User.id == user_id).with_for_update())
+        existing = saved_chat_turn(db, user_id, body)
+        if existing:
+            db.rollback()
+            return existing
+    if conv_id:
+        conversation = owned_conversation(db, user_id, conv_id, lock=True)
+    else:
+        conversation = Conversation(user_id=user_id, title=question[:100])
+        db.add(conversation)
+        db.flush()
+    conversation.updated_at = datetime.now(timezone.utc)
+    user_message = question
+    if image_attachment and redact_chat_secrets(image_attachment) == image_attachment:
+        user_message = f"{IMAGE_PREFIX}{image_attachment}]\n{question}"
+    answer = redact_chat_secrets(answer)
+    assistant = ChatMessage(conversation_id=conversation.id, role='assistant', content=answer)
+    db.add_all([ChatMessage(conversation_id=conversation.id, role='user', content=user_message), assistant])
+    if body.request_id:
+        db.flush()
+        db.add(ChatTurn(user_id=user_id, request_id=str(body.request_id), conversation_id=conversation.id, answer_id=assistant.id))
+    saved_id = conversation.id
+    db.commit()
+    return saved_id, answer
+
+
 @app.post('/api/v1/chatbot/ask')
 def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user)):
     """Answer with classification, role-scoped aggregates, general reasoning and response timing metrics."""
@@ -1389,7 +1466,7 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
     db_time = 0.0
     llm_time = 0.0
     image_bytes, mime_type = parse_image_data(body.image_base64)
-    effective_question = body.question.strip()
+    effective_question = redact_chat_secrets(body.question.strip())
     if not effective_question and image_bytes:
         effective_question = 'Hãy đọc, nhận diện và phân tích chi tiết hình ảnh này.'
     elif not effective_question and not image_bytes:
@@ -1398,6 +1475,9 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
     conversation=db.get(Conversation,body.conversation_id) if body.conversation_id else None
     if body.conversation_id and (not conversation or conversation.user_id!=user.id):
         fail('Không tìm thấy cuộc trò chuyện hoặc bạn không có quyền truy cập',404)
+    saved = saved_chat_turn(db, user.id, body)
+    if saved:
+        return {'conversation_id': saved[0], 'answer': saved[1], 'mode': 'saved'}
     history=[];previous_answer=None;chat_history=[]
     if conversation:
         history=list(reversed(db.scalars(select(ChatMessage.content).where(
@@ -1488,11 +1568,7 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
                 mode='database-fallback';fallback_reason=exc.code;gemini_connected=False
                 answer='Đang sử dụng chế độ dự phòng (số liệu truy vấn từ backend). '+chatbot_queries.render_fallback(plan,facts,display_labels)
 
-    user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
-    if not conversation:
-        conversation=Conversation(user_id=user.id,title=effective_question[:100]);db.add(conversation);db.flush()
-    db.add_all([ChatMessage(conversation_id=conversation.id,role='user',content=user_content),ChatMessage(conversation_id=conversation.id,role='assistant',content=answer)])
-    db.commit()
+    conv_id, answer = save_chat_turn(db, user.id, body, body.conversation_id, effective_question, answer, image_attachment=body.image_base64 if image_bytes else None)
     total_time=round((time.perf_counter()-t_start)*1000,1)
     return {
         'answer': answer,
@@ -1500,7 +1576,7 @@ def chat(body:ChatInput,db:Session=Depends(db_session),user=Depends(current_user
         'kind': kind,
         'fallback_reason': fallback_reason,
         'gemini_connected': gemini_connected,
-        'conversation_id': conversation.id,
+        'conversation_id': conv_id,
         'count_visible_invoices': facts.get('invoice_count'),
         'model': gemini_chat.active_model_name(),
         'web_sources': web_sources if kind == 'ordinary' else [],
@@ -1530,12 +1606,12 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
     """Streaming response via Server-Sent Events with stop generation and TTFT measurement."""
     t_start=time.perf_counter()
     image_bytes, mime_type = parse_image_data(body.image_base64)
-    effective_question = body.question.strip()
+    effective_question = redact_chat_secrets(body.question.strip())
     if not effective_question and image_bytes:
         effective_question = 'Hãy đọc, nhận diện và phân tích chi tiết hình ảnh này.'
     elif not effective_question and not image_bytes:
         async def err_gen():
-            yield f"event: error\ndata: {json.dumps({'error':'Vui lòng nhập câu hỏi hoặc đính kèm hình ảnh'},ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error':'Vui lòng nhập câu hỏi hoặc đính kèm hình ảnh','status':400},ensure_ascii=False)}\n\n"
         return StreamingResponse(err_gen(), media_type='text/event-stream')
 
     async def event_generator():
@@ -1544,12 +1620,14 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
         with get_chat_db() as db:
             conversation=db.get(Conversation,body.conversation_id) if body.conversation_id else None
             if body.conversation_id and (not conversation or conversation.user_id!=user.id):
-                yield f"event: error\ndata: {json.dumps({'error':'Cuộc trò chuyện không tồn tại hoặc bạn không có quyền'})}\n\n"
+                yield f"event: error\ndata: {json.dumps({'error':'Cuộc trò chuyện không tồn tại hoặc bạn không có quyền','status':404})}\n\n"
                 return
-            if not conversation:
-                conversation=Conversation(user_id=user.id,title=effective_question[:100])
-                db.add(conversation);db.commit();db.refresh(conversation)
-            conv_id=conversation.id
+            saved = saved_chat_turn(db, user.id, body)
+            if saved:
+                yield f"event: delta\ndata: {json.dumps({'text': saved[1]}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'conversation_id': saved[0], 'answer': saved[1]}, ensure_ascii=False)}\n\n"
+                return
+            conv_id = conversation.id if conversation else None
             history=list(reversed(db.scalars(select(ChatMessage.content).where(
                 ChatMessage.conversation_id==conv_id,ChatMessage.role=='user'
             ).order_by(desc(ChatMessage.id)).limit(12)).all()))
@@ -1576,19 +1654,21 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
                 kind = 'ordinary'
             plan=classification.get('plan') or chatbot_queries.parse_plan(effective_question,role=user.role,previous_context=previous_plan)
 
+            sent_text = []
             facts={};display_labels={};full_chunks=[]
             ttft_ms=None
 
             if kind=='security':
                 answer=SECURITY_REFUSAL
                 yield f"event: meta\ndata: {json.dumps({'conversation_id':conv_id,'kind':'security','model':gemini_chat.active_model_name(),'db_time_ms':0},ensure_ascii=False)}\n\n"
+                sent_text.append(answer)
                 yield f"event: delta\ndata: {json.dumps({'text':answer},ensure_ascii=False)}\n\n"
                 ttft_ms=round((time.perf_counter()-t0)*1000,1)
                 tot=round((time.perf_counter()-t0)*1000,1)
-                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'security','ttft_ms':ttft_ms,'llm_time_ms':0,'total_time_ms':tot},ensure_ascii=False)}\n\n"
-                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
-                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=answer)])
-                db.commit()
+                if await request.is_disconnected():
+                    return
+                conv_id, persisted_answer = save_chat_turn(db, user.id, body, conv_id, effective_question, answer, image_attachment=body.image_base64 if image_bytes else None)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,**({'answer':persisted_answer} if persisted_answer != ''.join(sent_text) else {}),'kind':'security','ttft_ms':ttft_ms,'llm_time_ms':0,'total_time_ms':tot},ensure_ascii=False)}\n\n"
                 return
 
             if kind=='ordinary' or image_bytes:
@@ -1605,25 +1685,27 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
                     if 'sources_collector' in gen_params: gen_kwargs['sources_collector'] = web_sources
                     async for fragment in gemini_chat.stream_general(effective_question, **gen_kwargs):
                         if await request.is_disconnected():
-                            break
+                            return
                         if ttft_ms is None:
                             ttft_ms=round((time.perf_counter()-t0)*1000,1)
                         full_chunks.append(fragment)
+                        sent_text.append(fragment)
                         yield f"event: delta\ndata: {json.dumps({'text':fragment},ensure_ascii=False)}\n\n"
                 except gemini_chat.GeminiUnavailable as exc:
                     err_text=gemini_chat.friendly_error(exc.code)
-                    full_chunks.append(err_text)
+                    full_chunks = [err_text]
                     if ttft_ms is None: ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                    sent_text.append(err_text)
                     yield f"event: delta\ndata: {json.dumps({'text':err_text},ensure_ascii=False)}\n\n"
 
                 final_answer=''.join(full_chunks)
                 t_end=time.perf_counter()
                 llm_time=round((t_end-t_llm0)*1000,1)
                 tot=round((t_end-t0)*1000,1)
-                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':'ordinary','ttft_ms':ttft_ms or tot,'llm_time_ms':llm_time,'total_time_ms':tot,'model':gemini_chat.active_model_name(),'web_sources':web_sources},ensure_ascii=False)}\n\n"
-                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
-                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=final_answer)])
-                db.commit()
+                if await request.is_disconnected():
+                    return
+                conv_id, persisted_answer = save_chat_turn(db, user.id, body, conv_id, effective_question, final_answer, image_attachment=body.image_base64 if image_bytes else None)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,**({'answer':persisted_answer} if persisted_answer != ''.join(sent_text) else {}),'kind':'ordinary','ttft_ms':ttft_ms or tot,'llm_time_ms':llm_time,'total_time_ms':tot,'model':gemini_chat.active_model_name(),'web_sources':web_sources},ensure_ascii=False)}\n\n"
                 return
 
             # Business or Analysis
@@ -1644,12 +1726,13 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
             if plan.get('format')=='table' or no_data:
                 fallback_text=chatbot_queries.render_fallback(plan,facts,display_labels)
                 ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                sent_text.append(fallback_text)
                 yield f"event: delta\ndata: {json.dumps({'text':fallback_text},ensure_ascii=False)}\n\n"
                 tot=round((time.perf_counter()-t0)*1000,1)
-                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':kind,'ttft_ms':ttft_ms,'db_time_ms':db_time,'llm_time_ms':0,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
-                user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
-                db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=fallback_text)])
-                db.commit()
+                if await request.is_disconnected():
+                    return
+                conv_id, persisted_answer = save_chat_turn(db, user.id, body, conv_id, effective_question, fallback_text, image_attachment=body.image_base64 if image_bytes else None)
+                yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,**({'answer':persisted_answer} if persisted_answer != ''.join(sent_text) else {}),'kind':kind,'ttft_ms':ttft_ms,'db_time_ms':db_time,'llm_time_ms':0,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
                 return
 
             safe_previous={k:previous_plan.get(k) for k in ('domain','metric','group_by','period','scope','format','status_filter')} if plan.get('contextual') and previous_plan else None
@@ -1657,16 +1740,18 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
             try:
                 async for fragment in gemini_chat.stream_analysis(plan,facts,safe_previous):
                     if await request.is_disconnected():
-                        break
+                        return
                     if ttft_ms is None:
                         ttft_ms=round((time.perf_counter()-t0)*1000,1)
                     fragment_display=chatbot_queries.apply_display_labels(fragment,display_labels)
                     full_chunks.append(fragment_display)
+                    sent_text.append(fragment_display)
                     yield f"event: delta\ndata: {json.dumps({'text':fragment_display},ensure_ascii=False)}\n\n"
             except gemini_chat.GeminiUnavailable as exc:
                 fallback_text='Đang sử dụng chế độ dự phòng (số liệu truy vấn từ backend). '+chatbot_queries.render_fallback(plan,facts,display_labels)
-                full_chunks.append(fallback_text)
+                full_chunks = [fallback_text]
                 if ttft_ms is None: ttft_ms=round((time.perf_counter()-t0)*1000,1)
+                sent_text.append(fallback_text)
                 yield f"event: delta\ndata: {json.dumps({'text':fallback_text},ensure_ascii=False)}\n\n"
 
             final_answer=''.join(full_chunks)
@@ -1675,10 +1760,10 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
             t_end=time.perf_counter()
             llm_time=round((t_end-t_llm0)*1000,1)
             tot=round((t_end-t0)*1000,1)
-            yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,'kind':kind,'ttft_ms':ttft_ms or tot,'db_time_ms':db_time,'llm_time_ms':llm_time,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
-            user_content = f"{IMAGE_PREFIX}{body.image_base64}]\n{effective_question}" if body.image_base64 else effective_question
-            db.add_all([ChatMessage(conversation_id=conv_id,role='user',content=user_content),ChatMessage(conversation_id=conv_id,role='assistant',content=final_answer)])
-            db.commit()
+            if await request.is_disconnected():
+                return
+            conv_id, persisted_answer = save_chat_turn(db, user.id, body, conv_id, effective_question, final_answer, image_attachment=body.image_base64 if image_bytes else None)
+            yield f"event: done\ndata: {json.dumps({'conversation_id':conv_id,**({'answer':persisted_answer} if persisted_answer != ''.join(sent_text) else {}),'kind':kind,'ttft_ms':ttft_ms or tot,'db_time_ms':db_time,'llm_time_ms':llm_time,'total_time_ms':tot,'count_visible_invoices':facts.get('invoice_count'),'model':gemini_chat.active_model_name()},ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(),media_type='text/event-stream',headers={
         'Cache-Control':'no-cache','X-Accel-Buffering':'no','Connection':'keep-alive'
@@ -1688,26 +1773,59 @@ async def chat_stream(body:ChatInput,request:Request,user=Depends(current_user))
 def chatbot_status(user=Depends(current_user)):
     return gemini_chat.health_check()
 
+def conversation_summary(conversation):
+    updated_at = conversation.updated_at or conversation.created_at
+    return {
+        'id': conversation.id,
+        'title': conversation.title or 'Cuộc trò chuyện mới',
+        'created_at': schedule_db_datetime(conversation.created_at).isoformat() if conversation.created_at else None,
+        'updated_at': schedule_db_datetime(updated_at).isoformat() if updated_at else None,
+    }
+
+
 @app.get('/api/v1/chatbot/conversations')
-def get_conversations(db:Session=Depends(db_session),user=Depends(current_user)):
-    rows=db.scalars(select(Conversation).where(Conversation.user_id==user.id).order_by(desc(Conversation.id)).limit(50)).all()
-    res=[]
-    for c in rows:
-        last_msg=db.scalar(select(ChatMessage.content).where(ChatMessage.conversation_id==c.id,ChatMessage.role=='user').order_by(ChatMessage.id.asc()).limit(1))
-        preview=''
-        if last_msg:
-            if last_msg.startswith(IMAGE_PREFIX):
-                idx=last_msg.find("]\n")
-                if idx!=-1:
-                    last_msg='[Hình ảnh] '+last_msg[idx+2:]
-            preview=(last_msg[:60]+'...') if len(last_msg)>60 else last_msg
-        res.append({
-            'id':c.id,
-            'title':c.title or 'Cuộc trò chuyện mới',
-            'created_at':c.created_at.isoformat() if c.created_at else None,
-            'preview':preview
-        })
-    return res
+def get_conversations(
+    limit: int = Query(50, ge=1, le=100), before_id: int | None = Query(None, gt=0),
+    db: Session = Depends(db_session), user=Depends(current_user),
+):
+    first_message = select(ChatMessage.content).where(
+        ChatMessage.conversation_id == Conversation.id, ChatMessage.role == 'user'
+    ).order_by(ChatMessage.id).limit(1).scalar_subquery()
+    query = select(Conversation, first_message).where(Conversation.user_id == user.id)
+    if before_id is not None:
+        query = query.where(Conversation.id < before_id)
+    rows = db.execute(query.order_by(Conversation.id.desc()).limit(limit)).all()
+    results = []
+    for conversation, first in rows:
+        preview = first or ''
+        if preview.startswith(IMAGE_PREFIX) and ']\n' in preview:
+            preview = '[Hình ảnh] ' + preview.split(']\n', 1)[1]
+        results.append({**conversation_summary(conversation), 'preview': preview[:60] + ('...' if len(preview) > 60 else '')})
+    return results
+
+
+@app.post('/api/v1/chatbot/conversations', status_code=201)
+def create_conversation(body: ConversationTitle, db: Session = Depends(db_session), user=Depends(current_user)):
+    title = redact_chat_secrets(body.title.strip())
+    if not title:
+        fail('Vui lòng nhập tiêu đề', 422)
+    conversation = Conversation(user_id=user.id, title=title)
+    db.add(conversation)
+    db.commit()
+    return conversation_summary(conversation)
+
+
+@app.patch('/api/v1/chatbot/conversations/{conv_id}')
+def rename_conversation(conv_id: int, body: ConversationTitle, db: Session = Depends(db_session), user=Depends(current_user)):
+    conversation = owned_conversation(db, user.id, conv_id, lock=True)
+    title = redact_chat_secrets(body.title.strip())
+    if not title:
+        fail('Vui lòng nhập tiêu đề', 422)
+    conversation.title = title
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return conversation_summary(conversation)
+
 
 @app.get('/api/v1/chatbot/conversations/{conv_id}')
 def get_conversation_detail(conv_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
@@ -1726,20 +1844,17 @@ def get_conversation_detail(conv_id:int,db:Session=Depends(db_session),user=Depe
                 text=text[idx+2:]
         res_msgs.append({'id':m.id,'role':m.role,'content':text,'image':img})
     return {
-        'id':c.id,
-        'title':c.title or 'Cuộc trò chuyện mới',
-        'created_at':c.created_at.isoformat() if c.created_at else None,
+        **conversation_summary(c),
         'messages':res_msgs
     }
 
 @app.delete('/api/v1/chatbot/conversations/{conv_id}')
 def delete_conversation(conv_id:int,db:Session=Depends(db_session),user=Depends(current_user)):
-    c=db.get(Conversation,conv_id)
-    if not c or c.user_id!=user.id:
-        fail('Không tìm thấy cuộc trò chuyện',404)
-    chat_msgs=db.scalars(select(ChatMessage).where(ChatMessage.conversation_id==c.id)).all()
-    for cm in chat_msgs:
-        db.delete(cm)
+    c = owned_conversation(db, user.id, conv_id, lock=True)
+    message_ids = select(ChatMessage.id).where(ChatMessage.conversation_id == conv_id)
+    db.execute(ChatTurn.__table__.delete().where(ChatTurn.conversation_id == conv_id))
+    db.execute(ChatMessageSource.__table__.delete().where(ChatMessageSource.message_id.in_(message_ids)))
+    db.execute(ChatMessage.__table__.delete().where(ChatMessage.conversation_id == conv_id))
     db.delete(c)
     db.commit()
     return {'status':'deleted'}

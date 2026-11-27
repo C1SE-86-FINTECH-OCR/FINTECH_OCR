@@ -6,6 +6,8 @@ import argparse
 
 from sqlalchemy import inspect
 
+from migrations.chat_history_v1 import upgrade as upgrade_chat_history
+from migrations.ranking_demo_v1 import upgrade as upgrade_ranking_demo
 from migrations.profile_v1 import upgrade as upgrade_profile
 from migrations.report_history_v1 import upgrade as upgrade_report_history
 from migrations.schedule_notes_v1 import upgrade as upgrade_schedule_notes
@@ -18,6 +20,7 @@ def upgrade(connection):
         raise RuntimeError("Existing base schema required; missing tables: " + ", ".join(sorted(missing)))
 
     from app.models import DirectMessage, InvoiceMessage
+    from app.travel_models import TravelAdvance, TravelAdvanceEvent, TravelExpense, TravelPayment, TravelPaymentEvidence
 
     results = {
         "profile": upgrade_profile(connection),
@@ -30,6 +33,13 @@ def upgrade(connection):
         existed = inspect(connection).has_table(table.name)
         table.create(connection, checkfirst=True)
         results[table.name] = "already current" if existed else "created"
+    if {"conversations", "chat_messages", "users"} <= set(inspect(connection).get_table_names()):
+        results["chat_history"] = upgrade_chat_history(connection)
+    if inspect(connection).has_table("invoices"):
+        for model in (TravelAdvance, TravelExpense, TravelPayment, TravelAdvanceEvent, TravelPaymentEvidence):
+            model.__table__.create(connection, checkfirst=True)
+        results["travel_advances"] = "ready"
+    results["ranking_demo"] = upgrade_ranking_demo(connection)
     return results
 
 

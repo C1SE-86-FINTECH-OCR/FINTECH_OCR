@@ -9,7 +9,28 @@ python -m migrations.upgrade_existing
 python -m migrations.upgrade_existing --apply
 ```
 
-The first command only displays the target (password masked); run the second only after checking it. The runner reuses the existing additive Profile, Report and Schedule migrations in order, then creates missing invoice/direct message tables. It does not run test-only Phase 2 migrations or reset data. A pre-existing base schema is required. For a new SQLite development database, start the API as usual.
+The first command only displays the target (password masked); run the second only after checking it. The runner reuses the existing additive Profile, Report and Schedule migrations in order, then creates missing invoice/direct message tables and applies the chat history and travel advance schema changes. It does not run test-only Phase 2 migrations or reset data. A pre-existing base schema is required. For a new SQLite development database, start the API as usual.
+
+## Lịch sử AI và tạm ứng công tác phí
+
+Chạy `python -m migrations.upgrade_existing --apply` một lần trước khi khởi động phiên bản API mới.
+Migration bổ sung `conversations.updated_at` từ tin nhắn mới nhất, giữ nguyên hội thoại
+và ảnh cũ, tạo chỉ mục tra cứu và bảng `chat_turns` để phát hiện gửi lại cùng yêu cầu.
+Migration tạo các bảng `travel_advances`, `travel_expenses`, `travel_payments`,
+`travel_payment_evidence` và `travel_advance_events`, tham chiếu người dùng,
+chuyến công tác và hóa đơn hiện có. Migration dùng transaction và có thể chạy lại.
+
+`TRAVEL_ADVANCE_APPROVER_IDS` nhận mảng JSON chứa ID tài khoản Admin hoặc Accountant
+được chỉ định duyệt/từ chối tạm ứng. Giá trị mặc định là `[]`. Quyền phê duyệt hóa đơn
+và quyền duyệt tạm ứng được kiểm tra theo từng API. Accountants dùng phạm vi toàn
+đơn vị giống luồng hóa đơn hiện tại. Admin được xem hồ sơ và nhật ký, quyền thực
+hiện phê duyệt yêu cầu tài khoản được chỉ định. Nhân viên thao tác trên hồ sơ của mình.
+
+Ranking dùng ngày hoàn thành tại Việt Nam, lấy ngày kết thúc cho chuyến hoàn thành
+cũ thiếu dấu thời gian. Báo cáo tạm ứng dùng ngày bắt đầu chuyến công tác đã chụp
+khi mở hồ sơ. Báo cáo CSV có chế độ theo hồ sơ, theo nhân viên và theo chuyến.
+Kế toán nhập kết quả đối chiếu quy định nội bộ khi xem xét từng khoản chi.
+Gemini chỉ được gọi theo yêu cầu để diễn giải trường số đã OCR và mã cảnh báo.
 
 ## Existing Profile, Report, and Schedule databases
 
@@ -93,3 +114,8 @@ The additive change preserves all existing trips and can be run repeatedly:
 ```powershell
 .\.venv\Scripts\python.exe -m migrations.schedule_notes_v1
 ```
+
+## Xếp hạng và dữ liệu mẫu
+
+Trình nâng cấp ghi dấu các lịch mẫu cũ khớp mẫu seed gốc trong nhật ký.
+Ranking bỏ qua các lịch có dấu này. Lịch và các hồ sơ tạm ứng liên kết vẫn được lưu.

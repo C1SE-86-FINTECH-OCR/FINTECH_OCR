@@ -1,6 +1,6 @@
 const VIETNAM_ZONE = 'Asia/Ho_Chi_Minh';
 
-function vietnamDateParts(now) {
+export function vietnamDateParts(now) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: VIETNAM_ZONE,
     year: 'numeric',

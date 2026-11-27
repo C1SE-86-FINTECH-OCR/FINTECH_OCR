@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
     access_token_minutes: int = 480
     app_env: str = 'development'
+    travel_advance_approver_ids: list[int] = []
     gemini_api_key: str = ''
     gemini_model: str = 'gemini-3.1-flash-lite'
 settings=Settings()

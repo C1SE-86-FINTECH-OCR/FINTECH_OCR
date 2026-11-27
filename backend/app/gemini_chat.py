@@ -533,6 +533,22 @@ def answer_for(plan: dict[str, Any], facts: dict[str, Any], previous_plan: dict[
         raise
 
 
+def travel_receipt_advice(facts: dict[str, Any]) -> str:
+    system = (
+        'Bạn hỗ trợ kế toán đọc kết quả OCR chứng từ công tác. Trả lời bằng tiếng Việt. '
+        'Giải thích các trường tiền đã nhận diện, chỉ ra số liệu thiếu hoặc bất thường, và liệt kê điều cần đối chiếu. '
+        'Chỉ dựa vào JSON đầu vào. Không suy diễn nội dung gốc, không xác minh tính hợp pháp, '
+        'không kết luận duyệt, từ chối hoặc xác định số tiền được quyết toán.'
+    )
+    prompt = __import__('json').dumps(facts, ensure_ascii=False, separators=(',', ':'))
+    try:
+        return _call(prompt, system_instruction=system)
+    except GeminiUnavailable as exc:
+        if exc.code in ('upstream', 'model') and model_name() != FAST_FALLBACK_MODEL:
+            return _call(prompt, system_instruction=system, model=FAST_FALLBACK_MODEL)
+        raise
+
+
 def friendly_error(code: str) -> str:
     return {
         'not_configured': 'Gemini chưa được cấu hình. Hãy kiểm tra GEMINI_API_KEY trong backend/.env.',
