@@ -293,7 +293,7 @@ def login(data:LoginBody,db:Session=Depends(db_session)):
     user=db.scalar(select(User).where(func.lower(User.email)==data.email.strip().lower()))
     if not user or not verify_password(data.password,user.password_hash):fail('Email ho\u1eb7c m\u1eadt kh\u1ea9u kh\u00f4ng \u0111\u00fang',401)
     if user.status!='active':fail('T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb v\u00f4 hi\u1ec7u h\u00f3a',403)
-    user.last_login_at=datetime.now(timezone.utc); _ensure_december_accountant_schedules(db, user); db.commit()
+    user.last_login_at=datetime.now(timezone.utc); db.commit()
     return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':profile_ser(user)}
 @app.get('/api/v1/auth/me')
 def me(user=Depends(current_user)):return profile_ser(user)
@@ -908,6 +908,8 @@ def read_all(db:Session=Depends(db_session),user=Depends(current_user)):
     db.commit();return {'ok':True}
 def _ensure_december_accountant_schedules(db: Session, current_user_obj=None):
     if settings.app_env != 'development':
+        return
+    if db_session in app.dependency_overrides or getattr(app.state, 'phase2_test_session', None) is not None:
         return
     try:
         accountants = []
