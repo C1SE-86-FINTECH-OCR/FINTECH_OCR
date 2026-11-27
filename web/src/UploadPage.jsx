@@ -11,7 +11,7 @@ import { aiProcessingState, invoiceProcessingState } from './ocrRuntimeInfo';
 
 const statusLabel = value => ({
   valid: 'Hợp lệ', needs_review: 'Cần kiểm tra', error: 'Lỗi',
-  draft: 'Nháp', pending: 'Chờ xử lý', approved: 'Đã phê duyệt', rejected: 'Đã từ chối',
+  pending: 'Chờ xử lý', approved: 'Đã phê duyệt', rejected: 'Đã từ chối',
 })[value] || value || '—';
 
 const statusTone = value => ({
@@ -21,6 +21,7 @@ const statusTone = value => ({
 })[value] || 'gray';
 
 function StatusBadge({ value, label }) {
+  if (value === 'draft') return null;
   return <span className={`pill pill-${statusTone(value)}`}>{label || statusLabel(value)}</span>;
 }
 
