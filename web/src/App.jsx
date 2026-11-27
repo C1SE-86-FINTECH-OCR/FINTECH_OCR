@@ -378,8 +378,8 @@ function Shell({user,onLogout,children}) {
   </NotificationContext.Provider>;
 }
 function HomePage({ user }) {
-  const { data, busy, error } = useLoad('/dashboard/summary');
-  const inv = useLoad('/invoices');
+  const { data, busy, error } = useLoad('/dashboard/summary?counted_only=true');
+  const inv = useLoad('/invoices?counted_only=true&limit=5');
   const sched = useLoad('/schedules');
   const navigate = useNavigate();
   const [chatPrompt, setChatPrompt] = useState('');
@@ -468,7 +468,24 @@ function HomePage({ user }) {
     </>}
   </>;
 }
-function InvoicesPage({user}){const showUploader=['accountant','admin'].includes(user.role);const[params,setParams]=useSearchParams();const search=params.get('search')||'';const setSearch=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('search',value);else next.delete('search');return next},{replace:true});const status=['pending','approved','rejected'].includes(params.get('status'))?params.get('status'):'';const setStatus=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('status',value);else next.delete('status');return next});const {data,busy,reload,error}=useLoad('/invoices?'+new URLSearchParams({...invoiceDateRange(['month','year','quarter'].includes(params.get('period'))?params.get('period'):'',params.get('date_value'),params.get('quarter')||'1'),...search?{search:search.trim()}:{},...status?{approval_status:status}:{}}));const n=useNavigate();let rows=(data||[]).filter(i=>(!status||i.approval_status===status));return <><Title title="Hóa đơn" description="Tìm kiếm, lọc và xem dữ liệu hóa đơn."/><div className="panel"><div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['pending','approved','rejected'].map(s=><option key={s} value={s}>{approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={reload}><RefreshCw size={16}/></button></div><InvoiceDateFilter params={params} setParams={setParams}/>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th>{showUploader&&<th>Người gửi hóa đơn</th>}<th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td>{showUploader&&<td>{i.uploaded_by_name||'Không xác định'}</td>}<td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td><Status value={i.approval_status}/></td><td><Status value={i.lookup_status}/></td><td><div className="invoice-message-actions">
+const unsubmittedInvoiceLabel='Chưa gửi duyệt';
+
+function UnsubmittedInvoiceNotice({count,active,onToggle}){
+  return <button type="button" className="warning-box invoice-unsubmitted-notice" aria-pressed={active} onClick={onToggle}>
+    <AlertTriangle size={18} aria-hidden="true"/>
+    <span className="invoice-unsubmitted-copy">
+      <strong>{active?'Đang xem hóa đơn chưa gửi duyệt':`Có ${count} hóa đơn chưa gửi duyệt`}</strong>
+      {active&&<small>Quay lại danh sách hóa đơn</small>}
+    </span>
+    <ArrowRight size={16} aria-hidden="true"/>
+  </button>;
+}
+
+function InvoicesPage({user}){
+  const {data:unsubmitted,reload:reloadUnsubmitted}=useLoad('/invoices/unsubmitted-count');
+  const showUploader=['accountant','admin'].includes(user.role);const[params,setParams]=useSearchParams();const search=params.get('search')||'';const setSearch=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('search',value);else next.delete('search');return next},{replace:true});const status=['draft','pending','approved','rejected'].includes(params.get('status'))?params.get('status'):'';const draftView=status==='draft';const setStatus=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('status',value);else next.delete('status');return next});const {data,busy,reload,error}=useLoad('/invoices?'+new URLSearchParams({[draftView?'unsubmitted_only':'counted_only']:'true',...invoiceDateRange(['month','year','quarter'].includes(params.get('period'))?params.get('period'):'',params.get('date_value'),params.get('quarter')||'1'),...search?{search:search.trim()}:{},...status?{approval_status:status}:{}}),{allPages:true});const n=useNavigate();let rows=(data||[]).filter(i=>(draftView||i.approval_status!=='draft')&&(!status||i.approval_status===status));return <><Title title="Hóa đơn" description="Tìm kiếm, lọc và xem dữ liệu hóa đơn."/><div className="panel">
+    {(draftView||unsubmitted?.count>0)&&<UnsubmittedInvoiceNotice count={unsubmitted?.count} active={draftView} onToggle={()=>setParams(draftView?{}:{status:'draft'})}/>}
+    <div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['draft','pending','approved','rejected'].map(s=><option key={s} value={s}>{s==='draft'?unsubmittedInvoiceLabel:approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={()=>{reload();reloadUnsubmitted();}}><RefreshCw size={16}/></button></div><InvoiceDateFilter params={params} setParams={setParams}/>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th>{showUploader&&<th>Người gửi hóa đơn</th>}<th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td>{showUploader&&<td>{i.uploaded_by_name||'Không xác định'}</td>}<td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td>{draftView?<Pill type="gray">{unsubmittedInvoiceLabel}</Pill>:<Status value={i.approval_status}/>}</td><td><Status value={i.lookup_status}/></td><td><div className="invoice-message-actions">
   {showUploader && i.uploaded_by_name && i.uploaded_by!==user.id && (
     <button className="btn btn-small btn-outline" aria-label={'Nhắn tin với '+i.uploaded_by_name} title={'Nhắn tin với '+i.uploaded_by_name} onClick={()=>n('/messages?recipient='+i.uploaded_by)}>
       <MessageSquare size={17}/>
