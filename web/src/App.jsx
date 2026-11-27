@@ -133,6 +133,10 @@ function Shell({user,onLogout,children}) {
   const [menu,setMenu]=useState(false), n=useNavigate(), loc=useLocation();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+  const [bellPopup, setBellPopup] = useState(null);
+  const bellPopupTimerRef = useRef(null);
+  const lastSeenNotifIdRef = useRef(null);
+  const initialLoadRef = useRef(true);
   const userDropdownRef = useRef(null);
   const notifDropdownRef = useRef(null);
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
@@ -141,6 +145,59 @@ function Shell({user,onLogout,children}) {
   const previousPath=useRef(loc.pathname);
   const items=Array.isArray(notes.data)?notes.data:[];
   const unread=Number.isInteger(unreadCountState.data?.count)?unreadCountState.data.count:unreadNotificationCount(items);
+
+  const triggerBellPopup = useCallback((notif) => {
+    if (!notif) return;
+    if (bellPopupTimerRef.current) clearTimeout(bellPopupTimerRef.current);
+    setBellPopup(notif);
+    bellPopupTimerRef.current = setTimeout(() => {
+      setBellPopup(null);
+    }, 5000); // 5s tự biến mất
+  }, []);
+
+  useEffect(() => {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const latest = items[0];
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false;
+      lastSeenNotifIdRef.current = latest.id;
+      if (!latest.is_read) {
+        triggerBellPopup(latest);
+      }
+      return;
+    }
+    if (lastSeenNotifIdRef.current != null && latest.id > lastSeenNotifIdRef.current) {
+      lastSeenNotifIdRef.current = latest.id;
+      triggerBellPopup(latest);
+    } else if (lastSeenNotifIdRef.current == null) {
+      lastSeenNotifIdRef.current = latest.id;
+    }
+  }, [items, triggerBellPopup]);
+
+  useEffect(() => {
+    function handleCustomBell(e) {
+      if (e.detail) {
+        triggerBellPopup(e.detail);
+      }
+    }
+    window.addEventListener('fintech_bell_notification', handleCustomBell);
+    return () => window.removeEventListener('fintech_bell_notification', handleCustomBell);
+  }, [triggerBellPopup]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      notes.reload();
+      unreadCountState.reload();
+    }, 12000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (bellPopupTimerRef.current) clearTimeout(bellPopupTimerRef.current);
+    };
+  }, []);
+
   async function markRead(id){
     const changed=await markNotificationReadAfterSuccess(items,id,
       notificationId=>api('/notifications/'+notificationId+'/read',{method:'PATCH'}),notes.setData);
@@ -154,7 +211,7 @@ function Shell({user,onLogout,children}) {
   }
   const notificationState={
     items,busy:notes.busy,error:notes.error,reload:notes.reload,
-    markRead,markAllRead,
+    markRead,markAllRead,triggerBellPopup,
   };
   useEffect(()=>{
     setMenu(false);
@@ -209,11 +266,41 @@ function Shell({user,onLogout,children}) {
             <button
               className={`iconbtn bell ${notifDropdownOpen ? 'active' : ''}`}
               aria-label={unread>0?`Thông báo, ${unread} chưa đọc`:'Thông báo'}
-              onClick={()=>setNotifDropdownOpen(prev=>!prev)}
+              onClick={()=>{
+                setBellPopup(null);
+                setNotifDropdownOpen(prev=>!prev);
+              }}
               type="button"
             >
               <Bell size={19}/>{unread>0&&<i/>}
             </button>
+            {bellPopup && !notifDropdownOpen && (
+              <div
+                className="bell-popup-toast"
+                role="status"
+                aria-live="polite"
+                onClick={async () => {
+                  setBellPopup(null);
+                  if (bellPopup.id && !bellPopup.is_read) {
+                    await openNotificationAfterAccessCheck(bellPopup, api, markRead, n);
+                  } else {
+                    setNotifDropdownOpen(true);
+                  }
+                }}
+              >
+                <div className="bell-popup-icon"><Bell size={16}/></div>
+                <div className="bell-popup-body">
+                  <div className="bell-popup-title">{bellPopup.title || 'Thông báo mới'}</div>
+                  {bellPopup.message && <div className="bell-popup-desc">{bellPopup.message}</div>}
+                </div>
+                <button
+                  type="button"
+                  className="bell-popup-close"
+                  onClick={(e) => { e.stopPropagation(); setBellPopup(null); }}
+                  aria-label="Đóng thông báo"
+                >×</button>
+              </div>
+            )}
             {notifDropdownOpen && (
               <div className="notif-popover-menu" role="dialog" aria-label="Thông báo">
                 <div className="notif-popover-header">
