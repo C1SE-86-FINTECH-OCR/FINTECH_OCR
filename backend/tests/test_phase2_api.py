@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -10,6 +11,7 @@ import fitz
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -44,11 +46,22 @@ def test_postgres_startup_does_not_create_schema(monkeypatch, tmp_path):
 
 @pytest.fixture
 def api_env(tmp_path, monkeypatch):
-    test_engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    pg_url = os.environ.get('FINTECH_OCR_ISOLATED_PG_URL')
+    if pg_url:
+        url = make_url(pg_url)
+        if (url.get_backend_name() != 'postgresql' or url.host not in ('127.0.0.1', 'localhost')
+                or url.database != 'fintech_travel_upgrade_test'):
+            raise RuntimeError('Use a disposable local PostgreSQL database named fintech_travel_upgrade_test')
+        schema = 'test_' + secrets.token_hex(8)
+        test_engine = create_engine(url, connect_args={'options': f'-c search_path={schema} -c timezone=UTC'})
+        with test_engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA {schema}'))
+    else:
+        test_engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     core.Base.metadata.create_all(test_engine)
     TestSession = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
     monkeypatch.setattr(api_main, "engine", test_engine)

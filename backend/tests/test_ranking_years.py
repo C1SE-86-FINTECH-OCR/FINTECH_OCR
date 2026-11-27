@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.models import Schedule
+from app.models import AuditLog, Schedule
 from tests.test_phase2_api import _token, api_env
 
 
@@ -38,6 +38,12 @@ def test_ranking_years_completion_dates_and_ties(api_env):
                 completed_at=datetime.fromisoformat(completion) if completion else None,
                 assigned_to=assignee, created_by=admin, status=status,
             ))
+        demo = Schedule(title='Demo', destination='Test', starts_at=datetime(2025, 2, 1),
+                        ends_at=datetime(2025, 2, 2), completed_at=datetime(2025, 2, 2),
+                        assigned_to=first, created_by=admin, status='completed')
+        db.add(demo)
+        db.flush()
+        db.add(AuditLog(actor_id=admin, action='schedule.demo_seeded', entity_type='schedule', entity_id=demo.id))
         db.commit()
 
     assert client.get(path + '/years').status_code == 401

@@ -1,3 +1,7 @@
+import TravelAdvancesPage from './TravelAdvancesPage';
+import './travelAdvances.css';
+import PeriodFilter from './PeriodFilter';
+import {currentPeriod, periodQuery, validPeriod} from './periodFilters';
 import BrandLogo,{BrandMark} from './BrandLogo.jsx';
 import InvoiceDateFilter from './InvoiceDateFilter.jsx';
 import {invoiceDateRange,emptyProfileInvoiceRange,profileInvoiceQuery} from './invoiceDateFilter.js';
@@ -88,8 +92,8 @@ return <div className="login-wrap"><div className="login-aside"><div className="
   </div>
 </div></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
 const messageNavItem=['/messages',"Tin nhắn",MessageSquare];
-const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
-function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký hoạt động",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
+function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký hoạt động",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
@@ -832,48 +836,38 @@ function InvoiceMessagesPage({id,user}){
 function SchedulePage({user}){return <EmployeeSchedulePage user={user}/>}
 function RankingPage(){
  const [params,setParams]=useSearchParams();
- const {data,busy,error,reload}=useLoad('/ranking/years');
- const requestedYear=params.get('year');
- const selected=params.get('period')==='all'?'all':
-   /^[1-9]\d{0,3}$/.test(requestedYear||'')?requestedYear:String(data?.current_year||'');
- const years=data?.years||[];
- const choices=selected!=='all'&&selected&&!years.includes(Number(selected))
-   ?[...years,Number(selected)].sort((a,b)=>b-a):years;
-
+ const period=params.get('period')||(params.has('year')?'year':'month');
+ const current=currentPeriod();
+ const selection={...current,...Object.fromEntries(params),period};
+ const query=periodQuery(selection);
+ query.set('include_totals','true');
  return <>
    <Title title="Xếp hạng công tác" description="Xếp hạng theo số chuyến công tác đã hoàn thành."/>
    <section className="panel">
-     <div className="filters">
-       <h3>Bảng xếp hạng nhân viên</h3>
-       {data&&<select aria-label="Năm công tác" value={selected}
-         onChange={e=>setParams(e.target.value==='all'?{period:'all'}:{year:e.target.value})}>
-         {choices.map(year=><option key={year} value={year}>Năm {year}</option>)}
-         <option value="all">Toàn thời gian</option>
-       </select>}
-     </div>
-     {busy?<Loading/>:error?<div><p className="error" role="alert">{error}</p>
-       <button type="button" className="btn btn-outline" onClick={reload}>Thử lại</button></div>:
-       <RankingTable key={selected} selected={selected}/>}
+     <PeriodFilter value={selection} onChange={next=>setParams(next)}/>
+     {validPeriod(selection)&&<RankingTable key={query.toString()} query={query.toString()}/>}
    </section>
  </>;
 }
 
-function RankingTable({selected}){
+function RankingTable({query}){
  const {hash}=useLocation();
- const {data,busy,error}=useLoad('/ranking?'+(selected==='all'?'period=all':'year='+selected));
+ const {data,busy,error}=useLoad('/ranking?'+query);
  useEffect(()=>{
    if(!busy&&hash)document.getElementById(hash.slice(1))?.scrollIntoView({block:'center',behavior:'smooth'});
  },[busy,data,hash]);
  if(busy)return <Loading/>;
  if(error)return <p className="error" role="alert">{error}</p>;
+ const totals=(data||[]).reduce((sum,row)=>[sum[0]+row.total,sum[1]+row.completed],[0,0]);
  return <div className="ranking">
+   <p>{totals[0]} chuyến công tác · {totals[1]} chuyến hoàn thành</p>
    {data?.map(r=><div className="rankrow" id={'ranking-'+r.user_id} key={r.user_id}>
-     <span className="rank">#{r.rank}</span>
+     <span className="rank">{r.rank ? '#'+r.rank : '—'}</span>
      <span className="avatar">{r.full_name.slice(-2).toUpperCase()}</span>
      <strong>{r.full_name}</strong>
-     <span className="rank-score">{r.completed} chuyến hoàn thành</span>
+     <span className="rank-score">{r.completed} / {r.total} chuyến hoàn thành</span>
    </div>)}
-   {!data?.length&&<Empty label={selected==='all'?'Chưa có chuyến công tác hoàn thành':'Không có dữ liệu công tác trong năm này'}/>}
+   {!data?.length&&<Empty label="Không có dữ liệu công tác trong kỳ này"/>}
  </div>;
 }
 function compressImage(file,maxDimension=1280,quality=0.85){
@@ -923,6 +917,10 @@ function ChatPage({user}){
   const [activeTitle,setActiveTitle]=useState('Cuộc trò chuyện mới');
   const [activeDate,setActiveDate]=useState('');
   const [conversations,setConversations]=useState([]);
+  const [hasOlder,setHasOlder]=useState(false);
+  const [historyBusy,setHistoryBusy]=useState(false);
+  const [historyError,setHistoryError]=useState('');
+  const historyRequest=useRef(0);
   const [copiedIdx,setCopiedIdx]=useState(null);
   const [feedback,setFeedback]=useState({});
 
@@ -969,15 +967,24 @@ function ChatPage({user}){
     if(!isoString)return '';
     try{
       const d=new Date(isoString);
-      return d.toLocaleDateString('vi-VN',{day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+      return d.toLocaleDateString('vi-VN',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Ho_Chi_Minh'})+' · '+d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Ho_Chi_Minh'});
     }catch{return '';}
   },[]);
 
-  const fetchConversations=useCallback(async()=>{
+  const fetchConversations=useCallback(async(beforeId)=>{
+    const request=++historyRequest.current;
+    setHistoryBusy(true);
+    setHistoryError('');
     try{
-      const list=await api('/chatbot/conversations');
-      setConversations(list||[]);
-    }catch{}
+      const list=await api('/chatbot/conversations?limit=30'+(beforeId?'&before_id='+beforeId:''));
+      if(request!==historyRequest.current)return;
+      setConversations(previous=>beforeId?[...previous,...list]:list);
+      setHasOlder(list.length===30);
+    }catch(error){
+      if(request===historyRequest.current)setHistoryError(error.message);
+    }finally{
+      if(request===historyRequest.current)setHistoryBusy(false);
+    }
   },[]);
 
   useEffect(()=>{
@@ -1001,8 +1008,7 @@ function ChatPage({user}){
     }
   }
 
-  function startNewChat(){
-    if(sending)return;
+  function resetChat(){
     setConversationId(null);
     setActiveTitle('Cuộc trò chuyện mới');
     setActiveDate('');
@@ -1012,25 +1018,39 @@ function ChatPage({user}){
   }
 
   async function selectConversation(conv){
-    if(sending||conv.id===conversationId)return;
+    if(sending||conv.id===conversationId||historyBusy)return;
+    setHistoryBusy(true);
+    setHistoryError('');
     try{
       const detail=await api('/chatbot/conversations/'+conv.id);
       setConversationId(detail.id);
-      setActiveTitle(detail.title||'Cuộc trò chuyện');
-      setActiveDate(detail.created_at?formatChatDate(detail.created_at):'');
+      setActiveTitle(detail.title);
+      setActiveDate(formatChatDate(detail.created_at));
       setMessages(detail.messages.map(m=>({role:m.role,content:m.content,image:m.image||null})));
-    }catch{}
+    }catch(error){setHistoryError(error.message)}
+    finally{setHistoryBusy(false)}
+  }
+
+  async function renameConv(conv,e){
+    e.stopPropagation();
+    if(sending||historyBusy)return;
+    const title=window.prompt('Tiêu đề cuộc trò chuyện',conv.title)?.trim();
+    if(!title||title===conv.title)return;
+    try{
+      const updated=await api('/chatbot/conversations/'+conv.id,{method:'PATCH',body:{title}});
+      setConversations(previous=>previous.map(item=>item.id===conv.id?updated:item));
+      if(conversationId===conv.id)setActiveTitle(updated.title);
+    }catch(error){setHistoryError(error.message)}
   }
 
   async function deleteConv(id,e){
     e.stopPropagation();
+    if(sending||historyBusy||!window.confirm('Xóa cuộc trò chuyện này?'))return;
     try{
       await api('/chatbot/conversations/'+id,{method:'DELETE'});
       setConversations(prev=>prev.filter(c=>c.id!==id));
-      if(conversationId===id){
-        startNewChat();
-      }
-    }catch{}
+      if(conversationId===id)resetChat();
+    }catch(error){setHistoryError(error.message)}
   }
 
   function copyMessage(text,idx){
@@ -1063,10 +1083,12 @@ function ChatPage({user}){
     abortRef.current=abortController;
     let accumulatedText='';
     let metaData=null;
+    let streamError=null;
+    const requestId=Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), n=>n.toString(16).padStart(8,'0')).join('');
 
     try{
       const token=authStore.get();
-      const body={question:q};
+      const body={question:q,request_id:requestId};
       if(currentImg)body.image_base64=currentImg;
       if(conversationId)body.conversation_id=conversationId;
 
@@ -1084,7 +1106,7 @@ function ChatPage({user}){
         let errJson;
         try{errJson=await response.json()}catch{}
         const errMsg=errJson?.detail||`Lỗi kết nối (HTTP ${response.status})`;
-        throw new Error(errMsg);
+        throw Object.assign(new Error(errMsg),{status:response.status});
       }
 
       const reader=response.body.getReader();
@@ -1117,18 +1139,20 @@ function ChatPage({user}){
                 accumulatedText+=data.text;
                 setStreamingText(accumulatedText);
               }
+            }else if(eventType==='error'){
+              streamError=Object.assign(new Error(data.error||'Không thể tạo phản hồi.'),{status:data.status||400});
             }else if(eventType==='done'){
               metaData=data;
+              if(typeof data.answer==='string')accumulatedText=data.answer;
               if(data.conversation_id)setConversationId(data.conversation_id);
               if(data.model)setConnection(s=>({...s,connected:true,model:data.model,state:'connected'}));
-            }else if(eventType==='error'){
-              accumulatedText+=(accumulatedText?'\n\n':'')+(data.error||'Đã xảy ra lỗi.');
-              setStreamingText(accumulatedText);
             }
           }catch(parseErr){}
         }
       }
 
+      if(streamError)throw streamError;
+      if(!metaData)throw new Error('Kết nối bị gián đoạn');
       if(accumulatedText){
         setMessages(x=>[...x,{role:'assistant',content:accumulatedText,meta:metaData}]);
         fetchConversations();
@@ -1137,11 +1161,12 @@ function ChatPage({user}){
       if(err.name==='AbortError'){
         if(accumulatedText){
           setMessages(x=>[...x,{role:'assistant',content:accumulatedText+' *(Đã dừng tạo câu trả lời)*',meta:metaData}]);
-          fetchConversations();
         }
+        fetchConversations();
       }else{
         try{
-          const fallbackBody={question:q};
+          if(err.status&&err.status<500&&err.status!==429)throw err;
+          const fallbackBody={question:q,request_id:requestId};
           if(currentImg)fallbackBody.image_base64=currentImg;
           if(conversationId)fallbackBody.conversation_id=conversationId;
           const r=await api('/chatbot/ask',{method:'POST',body:fallbackBody});
@@ -1189,8 +1214,7 @@ function ChatPage({user}){
 
   function groupConvs(list){
     const today=[],last7=[],older=[];
-    const now=new Date();
-    const startOfToday=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+    const startOfToday=Date.parse(currentPeriod().date_to+'T00:00:00+07:00');
     const sevenDaysAgo=startOfToday-7*86400000;
     for(const c of list){
       const t=c.created_at?new Date(c.created_at).getTime():0;
@@ -1227,10 +1251,12 @@ function ChatPage({user}){
     <div className="chat-layout">
       {/* Left Sidebar: Lịch sử trò chuyện */}
       <aside className="chat-sidebar">
-        <button type="button" className="chat-new-btn" onClick={startNewChat} title="Tạo cuộc trò chuyện mới">
+        <button type="button" className="chat-new-btn" disabled={sending||historyBusy} onClick={resetChat} title="Tạo cuộc trò chuyện mới">
           <Plus size={16}/> Cuộc trò chuyện mới
         </button>
 
+        {historyError&&<p className="error" role="alert">{historyError} <button type="button" onClick={()=>fetchConversations()}>Thử lại</button></p>}
+        {hasOlder&&<button type="button" className="btn btn-outline" disabled={historyBusy||sending} onClick={()=>fetchConversations(conversations.at(-1)?.id)}>Tải thêm</button>}
         <div className="chat-history-scroll">
           {conversations.length===0?(
             <div style={{textAlign:'center',padding:'30px 10px',color:'#9ca3af',fontSize:12}}>
@@ -1238,86 +1264,24 @@ function ChatPage({user}){
             </div>
           ):(
             <>
-              {today.length>0&&(
-                <div>
-                  <div className="chat-history-group-title">Hôm nay</div>
-                  {today.map(c=>(
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
-                      onClick={()=>selectConversation(c)}
-                    >
+              {[[today,'Hôm nay'],[last7,'7 ngày trước'],[older,'Cũ hơn']].map(([group,label])=>group.length>0&&(
+                <div key={label}>
+                  <div className="chat-history-group-title">{label}</div>
+                  {group.map(c=><div key={c.id} className={'chat-history-item '+(conversationId===c.id?'active':'')}>
+                    <button type="button" className="chat-history-open" disabled={sending||historyBusy} onClick={()=>selectConversation(c)}>
                       <Bookmark size={15}/>
-                      <div className="chat-history-item-body">
+                      <span className="chat-history-item-body">
                         <span className="chat-history-item-title">{c.title}</span>
-                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
-                      </div>
-                      <span
-                        className="chat-history-del-btn"
-                        onClick={(e)=>deleteConv(c.id,e)}
-                        title="Xóa cuộc trò chuyện"
-                      >
-                        <Trash2 size={13}/>
+                        <span className="chat-history-item-preview">{formatChatDate(c.updated_at)}</span>
                       </span>
                     </button>
-                  ))}
+                    <button type="button" className="chat-history-del-btn" disabled={sending||historyBusy}
+                      onClick={e=>renameConv(c,e)} title="Đổi tên" aria-label="Đổi tên cuộc trò chuyện"><Pencil size={13}/></button>
+                    <button type="button" className="chat-history-del-btn" disabled={sending||historyBusy}
+                      onClick={e=>deleteConv(c.id,e)} title="Xóa" aria-label="Xóa cuộc trò chuyện"><Trash2 size={13}/></button>
+                  </div>)}
                 </div>
-              )}
-
-              {last7.length>0&&(
-                <div>
-                  <div className="chat-history-group-title">7 ngày trước</div>
-                  {last7.map(c=>(
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
-                      onClick={()=>selectConversation(c)}
-                    >
-                      <Bookmark size={15}/>
-                      <div className="chat-history-item-body">
-                        <span className="chat-history-item-title">{c.title}</span>
-                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
-                      </div>
-                      <span
-                        className="chat-history-del-btn"
-                        onClick={(e)=>deleteConv(c.id,e)}
-                        title="Xóa cuộc trò chuyện"
-                      >
-                        <Trash2 size={13}/>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {older.length>0&&(
-                <div>
-                  <div className="chat-history-group-title">Cũ hơn</div>
-                  {older.map(c=>(
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={'chat-history-item '+(conversationId===c.id?'active':'')}
-                      onClick={()=>selectConversation(c)}
-                    >
-                      <Bookmark size={15}/>
-                      <div className="chat-history-item-body">
-                        <span className="chat-history-item-title">{c.title}</span>
-                        {c.preview&&<span className="chat-history-item-preview">{c.preview}</span>}
-                      </div>
-                      <span
-                        className="chat-history-del-btn"
-                        onClick={(e)=>deleteConv(c.id,e)}
-                        title="Xóa cuộc trò chuyện"
-                      >
-                        <Trash2 size={13}/>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              ))}
             </>
           )}
         </div>
@@ -2032,8 +1996,9 @@ export default function App(){
       <Route path="/upload" element={user.role==='employee'?<UploadPage/>:<Navigate to="/invoices"/>}/>
       <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage user={user}/>:<Navigate to="/"/>}/>
       <Route path="/schedule" element={<SchedulePage user={user}/>}/>
+      <Route path="/travel-advances" element={<TravelAdvancesPage key={user.id} user={user}/>}/>
       <Route path="/ranking" element={<RankingPage/>}/>
-      <Route path="/chat" element={<ChatPage user={user}/>}/>
+      <Route path="/chat" element={<ChatPage key={user.id} user={user}/>}/>
       <Route path="/reports" element={user.role!=='employee'?<ReportsPage/>:<Navigate to="/"/>}/>
       <Route path="/users" element={user.role==='admin'?<UsersPage/>:<Navigate to="/"/>}/>
       <Route path="/audit" element={user.role==='admin'?<AuditPage/>:<Navigate to="/"/>}/>

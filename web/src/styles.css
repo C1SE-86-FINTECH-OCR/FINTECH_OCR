@@ -947,7 +947,9 @@
 .chat-history-item-title{display:block;font-size:13px;font-weight:700;color:#1a1b1e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-history-item-preview{display:block;font-size:11px;color:#858890;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .chat-history-del-btn{opacity:0;background:transparent;border:none;color:#9ca3af;padding:4px;border-radius:6px;cursor:pointer;transition:opacity .15s,color .15s}
-.chat-history-item:hover .chat-history-del-btn{opacity:1}
+.chat-history-item:hover .chat-history-del-btn,.chat-history-item:focus-within .chat-history-del-btn{opacity:1}
+.chat-history-open{display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0;border:0;background:none;padding:0;text-align:left;cursor:pointer}
+@media (hover:none){.chat-history-del-btn{opacity:1}}
 .chat-history-del-btn:hover{color:#ef4444;background:#fee2e2}
 .chat-sidebar-security{background:#f6f6f8;border:1px solid #ededf0;border-radius:14px;padding:12px 14px;display:flex;align-items:flex-start;gap:10px;font-size:11px;color:#61636a;line-height:1.45}
 .chat-sidebar-security svg{flex-shrink:0;color:#71737a;margin-top:2px}

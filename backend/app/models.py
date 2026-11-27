@@ -1,5 +1,5 @@
 from datetime import datetime,timezone,date
-from sqlalchemy import String,Integer,ForeignKey,DateTime,Date,Numeric,Text,Boolean,Float,UniqueConstraint,JSON,LargeBinary
+from sqlalchemy import String,Integer,Index,ForeignKey,DateTime,Date,Numeric,Text,Boolean,Float,UniqueConstraint,JSON,LargeBinary
 from sqlalchemy.orm import Mapped,mapped_column,relationship
 from .core import Base
 
@@ -126,17 +126,27 @@ class InvoiceFlag(Base):
     status:Mapped[str]=mapped_column(String(20),default='open')
 class Conversation(Base):
     __tablename__='conversations'
+    __table_args__=(Index('ix_conversations_user_id_id','user_id','id'),)
     id:Mapped[int]=mapped_column(primary_key=True)
     user_id:Mapped[int]=mapped_column(ForeignKey('users.id'))
     title:Mapped[str]=mapped_column(String(255))
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
+    updated_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),default=now)
 class ChatMessage(Base):
     __tablename__='chat_messages'
+    __table_args__=(Index('ix_chat_messages_conversation_id_id','conversation_id','id'),)
     id:Mapped[int]=mapped_column(primary_key=True)
     conversation_id:Mapped[int]=mapped_column(ForeignKey('conversations.id'))
     role:Mapped[str]=mapped_column(String(20))
     content:Mapped[str]=mapped_column(Text)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
+class ChatTurn(Base):
+    __tablename__='chat_turns'
+    user_id:Mapped[int]=mapped_column(ForeignKey('users.id'),primary_key=True)
+    request_id:Mapped[str]=mapped_column(String(36),primary_key=True)
+    conversation_id:Mapped[int]=mapped_column(ForeignKey('conversations.id'),index=True)
+    answer_id:Mapped[int]=mapped_column(ForeignKey('chat_messages.id'))
+
 class ChatMessageSource(Base):
     __tablename__='chat_message_sources'
     message_id:Mapped[int]=mapped_column(ForeignKey('chat_messages.id'),primary_key=True)
