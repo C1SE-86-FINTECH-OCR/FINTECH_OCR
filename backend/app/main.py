@@ -147,8 +147,13 @@ def inv_ser(i,db,details=False):
         payload['submitted_at']=submitted_at.isoformat() if hasattr(submitted_at,'isoformat') else str(submitted_at) if submitted_at else None
     return payload
 
-def invoice_q(db,user,*,personal=False):
+def invoice_q(db,user,*,personal=False,counted_only=False):
     q=select(Invoice).join(InvoiceFile,Invoice.file_id==InvoiceFile.id)
+    if counted_only:
+        q=q.where(
+            Invoice.validation_status.is_distinct_from('error'),
+            Invoice.approval_status.in_(('pending', 'approved', 'rejected')),
+        )
     return q if not personal and user.role in ('admin','accountant') else q.where(InvoiceFile.uploaded_by==user.id)
 def invoice_allowed(db,user,invoice_id):
     obj=db.scalar(invoice_q(db,user).where(Invoice.id==invoice_id))
@@ -443,9 +448,24 @@ def profile_invoices(
     return {'items': [dict(row) for row in rows], 'total': total}
 
 
+def unsubmitted_invoice_query(query):
+    return query.where(
+        Invoice.approval_status=='draft',
+        Invoice.validation_status.is_distinct_from('error'),
+    )
+
+
+@app.get('/api/v1/invoices/unsubmitted-count')
+def unsubmitted_invoice_count(db:Session=Depends(db_session),user=Depends(current_user)):
+    query=unsubmitted_invoice_query(invoice_q(db,user))
+    count=db.scalar(query.with_only_columns(func.count(Invoice.id)))
+    return {'count':count}
+
+
 @app.get('/api/v1/invoices')
-def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user)):
-    query=invoice_q(db,user)
+def invoices(search:str='',approval_status:str='',validation_status:str='',document_type:str='',invoice_date_from:date|None=None,invoice_date_to:date|None=None,limit:int=Query(250,ge=1,le=250),offset:int=Query(0,ge=0),db:Session=Depends(db_session),user=Depends(current_user),counted_only:bool=False,unsubmitted_only:bool=False):
+    query=invoice_q(db,user,counted_only=counted_only)
+    if unsubmitted_only:query=unsubmitted_invoice_query(query)
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
     query,search_rank=apply_invoice_search(query,db,search)
     if approval_status:query=query.where(Invoice.approval_status==approval_status)
@@ -805,9 +825,9 @@ def lookup(invoice_id:int,body:LookupInput,db:Session=Depends(db_session),user=D
     })
     audit(db,user.id,'invoice.lookup_recorded','invoice',i.id);db.commit();return inv_ser(i,db,True)
 @app.get('/api/v1/dashboard/summary')
-def summary(invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:Session=Depends(db_session),user=Depends(current_user)):
+def summary(invoice_date_from:date|None=None,invoice_date_to:date|None=None,db:Session=Depends(db_session),user=Depends(current_user),counted_only:bool=False):
     if invoice_date_from and invoice_date_to and invoice_date_from>invoice_date_to:fail('Ngày bắt đầu không được sau ngày kết thúc',422)
-    query=invoice_q(db,user)
+    query=invoice_q(db,user,counted_only=counted_only)
     if invoice_date_from:query=query.where(Invoice.invoice_date>=invoice_date_from)
     if invoice_date_to:query=query.where(Invoice.invoice_date<=invoice_date_to)
     rows=db.scalars(query).all()

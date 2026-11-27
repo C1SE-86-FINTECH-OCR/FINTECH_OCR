@@ -9,7 +9,7 @@ import pytest
 import fitz
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -1087,6 +1087,61 @@ def test_ranking_rejects_unknown_period(api_env):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("email", "expected_numbers", "expected_total"),
+    [
+        ("employee1@phase2.test", {"PAGE-003"}, 300),
+        ("accountant@phase2.test", {"PAGE-003", "OTHER-001"}, 700),
+        ("admin@phase2.test", {"PAGE-003", "OTHER-001"}, 700),
+    ],
+)
+def test_dashboard_and_list_count_only_submitted_invoices_without_errors(
+    api_env, email, expected_numbers, expected_total
+):
+    client, _, password = api_env
+    token = _token(client, email, password)
+    headers = {"Authorization": f"Bearer {token}"}
+    notice = client.get("/api/v1/invoices/unsubmitted-count", headers=headers)
+    assert notice.status_code == 200
+    assert notice.json() == {"count": 3 if email.startswith("employee") else 4}
+    with api_main.app.state.phase2_test_session() as db:
+        failed = db.scalar(select(Invoice).where(Invoice.invoice_number == "PAGE-001"))
+        failed.validation_status = "error"
+        failed.approval_status = "approved"
+        legacy = db.scalar(select(Invoice).where(Invoice.invoice_number == "OTHER-001"))
+        legacy.validation_status = None
+        legacy.approval_status = "pending"
+        rejected = db.scalar(select(Invoice).where(Invoice.invoice_number == "PAGE-003"))
+        rejected.approval_status = "rejected"
+        db.commit()
+
+    params = {"counted_only": "true"}
+    summary = client.get("/api/v1/dashboard/summary", params=params, headers=headers)
+    invoices = client.get("/api/v1/invoices", params=params, headers=headers)
+    assert summary.status_code == invoices.status_code == 200
+    data = summary.json()
+    assert {row["invoice_number"] for row in invoices.json()} == expected_numbers
+    assert data["total_invoices"] == len(invoices.json()) == len(expected_numbers)
+    assert data["approved"] == data["error"] == data["draft"] == 0
+    assert data["rejected"] == 1
+    assert data["total_invoices"] == sum(data[status] for status in ("pending", "approved", "rejected"))
+    drafts = client.get("/api/v1/invoices?approval_status=draft", headers=headers)
+    assert drafts.status_code == 200
+    assert {row["invoice_number"] for row in drafts.json()} == {"PAGE-002"}
+    assert data["total_amount"] == expected_total
+    assert sum(month["invoice_count"] for month in data["monthly"]) == len(expected_numbers)
+    assert len(client.get("/api/v1/invoices?validation_status=error", headers=headers).json()) == 1
+    assert client.get("/api/v1/invoices/unsubmitted-count", headers=headers).json() == {"count": 1}
+    with api_main.app.state.phase2_test_session() as db:
+        failed = db.scalar(select(Invoice).where(Invoice.invoice_number == "PAGE-001"))
+        failed.approval_status = "draft"
+        db.commit()
+    visible_drafts = client.get("/api/v1/invoices?unsubmitted_only=true", headers=headers)
+    assert visible_drafts.status_code == 200
+    assert [row["invoice_number"] for row in visible_drafts.json()] == ["PAGE-002"]
+    assert client.get("/api/v1/invoices/unsubmitted-count", headers=headers).json() == {"count": len(visible_drafts.json())}
 
 
 def test_dashboard_totals_are_scoped_by_role(api_env):

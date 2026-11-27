@@ -942,6 +942,31 @@
   font-size: 31px;
 }
 
+.invoice-unsubmitted-notice {
+  width: 100%;
+  align-items: center;
+  margin: 0 0 16px;
+  text-align: left;
+}
+
+.invoice-unsubmitted-notice:hover {
+  background: #fff1d9;
+}
+
+.invoice-unsubmitted-copy {
+  flex: 1;
+}
+
+.invoice-unsubmitted-copy small {
+  display: block;
+  margin-top: 4px;
+  color: inherit;
+}
+
+.invoice-unsubmitted-notice > svg {
+  flex: none;
+}
+
 .nav-item,
 .btn,
 .pagehead p,
