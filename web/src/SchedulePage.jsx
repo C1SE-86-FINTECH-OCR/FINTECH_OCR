@@ -46,6 +46,7 @@ export default function SchedulePage({ user }) {
   const [selectedDate, setSelectedDate] = useState(dateKey(new Date())), [selectedId, setSelectedId] = useState(null), [panel, setPanel] = useState('');
   const [form, setForm] = useState({ title: '', destination: '', startDay: dateKey(new Date()), endDay: dateKey(new Date()), startTime: '09:00', endTime: '11:00', assigned_to: '', notes: '' });
   const [editing, setEditing] = useState(false), [busy, setBusy] = useState(true), [employeeBusy, setEmployeeBusy] = useState(false), [saving, setSaving] = useState(false);
+  const [editingNote, setEditingNote] = useState(false), [noteText, setNoteText] = useState(''), [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const [datePickerOpen, setDatePickerOpen] = useState(false), [pickerAnchor, setPickerAnchor] = useState(() => fromKey(dateKey(new Date()))), [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
   const dateButtonRef = useRef(null), datePopupRef = useRef(null);
@@ -170,6 +171,33 @@ export default function SchedulePage({ user }) {
     catch (e) { setError(e.message); }
   }
 
+  async function saveQuickNote(item) {
+    if (!item) return;
+    const canEditItem = isAdmin || (isEmployee && Number(item.assigned_to) === Number(user.id));
+    if (!canEditItem) { setError('Bạn không có quyền chỉnh sửa ghi chú lịch này.'); return; }
+    setError(''); setMessage(''); setSavingNote(true);
+    try {
+      const result = await api(`/schedules/${item.id}`, {
+        method: 'PATCH',
+        body: { notes: noteText.trim() || null }
+      });
+      setItems(current => current.map(x => x.id === result.id ? result : x));
+      setSelectedId(result.id);
+      setEditingNote(false);
+      setMessage('Đã lưu ghi chú công tác thành công.');
+      window.dispatchEvent(new CustomEvent('fintech_bell_notification', {
+        detail: {
+          title: 'Ghi chú công tác',
+          message: `Đã cập nhật ghi chú cho “${result.title}”`,
+        }
+      }));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
   const pageTitle = isAdmin ? 'Quản lý lịch công tác' : 'Lịch công tác của tôi';
   const pageDescription = isAdmin ? 'Phân công, lập kế hoạch và điều chỉnh lịch công tác của nhân viên và kế toán.' : isAccountant ? 'Theo dõi lịch trình công tác của bạn (Kế toán chỉ xem).' : 'Theo dõi và tự điều chỉnh lịch công tác phù hợp của bạn.';
   const periodLabel = view === 'month' ? `Tháng ${Number(monthParts.month)} năm ${monthParts.year}` : `${shortDateLabel(days[0])} - ${shortDateLabel(days[6])}`;
@@ -226,7 +254,7 @@ export default function SchedulePage({ user }) {
         {!panel && <div className="schedule-panel-empty"><CalendarDays size={28}/><h3>Lịch trình công tác</h3><p>{isAdmin ? 'Chọn một ngày để phân công hoặc chọn chuyến đi để xem chi tiết.' : isAccountant ? 'Chọn chuyến công tác trên lịch để theo dõi thông tin chi tiết.' : 'Chọn một ngày để tạo lịch hoặc chọn chuyến đi của bạn để xem và chỉnh sửa.'}</p></div>}
         {panel && <>
           <div className="schedule-side-head"><div><small>{panel === 'form' ? (editing ? 'CẬP NHẬT LỊCH' : (isAdmin ? 'PHÂN CÔNG CÔNG TÁC' : 'TẠO LỊCH CÔNG TÁC')) : panel === 'day' ? 'LỊCH TRONG NGÀY' : 'CHI TIẾT CHUYẾN ĐI'}</small><h2>{panel === 'form' ? (editing ? 'Chỉnh sửa lịch' : (isAdmin ? 'Phân công công tác' : 'Tạo lịch công tác')) : panel === 'day' ? dateLabel(fromKey(selectedDate), { day: 'numeric', month: 'long' }) : 'Chi tiết chuyến đi'}</h2></div><button className="iconbtn" aria-label="Đóng bảng chi tiết" onClick={() => setPanel('')}><X size={20}/></button></div>
-          {panel === 'form' && (editing ? selected && (isAdmin || (isEmployee && Number(selected.assigned_to) === Number(user.id))) : canCreate) && <form className="schedule-form" onSubmit={save}>
+          {panel === 'form' && (canCreate || editing) && <form className="schedule-form" onSubmit={save}>
             <p>{editing ? (isAdmin ? 'Cập nhật thông tin chuyến công tác đã phân công.' : 'Cập nhật chuyến công tác của bạn.') : (isAdmin ? 'Phân công chuyến công tác cho nhân viên.' : 'Thêm chuyến công tác mới vào lịch của bạn.')}</p>
             <label>Tên chuyến công tác<input required maxLength="255" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Ví dụ: Gặp đối tác"/></label>
             <div className="schedule-time-pair"><label>Ngày bắt đầu<input required type="date" value={form.startDay} onChange={e => setForm({ ...form, startDay: e.target.value })}/></label><label>Ngày kết thúc<input required type="date" min={form.startDay} value={form.endDay} onChange={e => setForm({ ...form, endDay: e.target.value })}/></label></div>
@@ -247,7 +275,53 @@ export default function SchedulePage({ user }) {
             <div className="schedule-detail-row"><MapPin/><span><small>Địa điểm</small><strong>{selected.destination}</strong></span></div>
             <div className="schedule-detail-row"><UserRound/><span><small>Nhân viên được phân công</small><strong>{selected.employee_name}</strong></span></div>
             <div className="schedule-detail-row"><Users/><span><small>Người tạo / phân công</small><strong>{selected.created_by_name || '—'}</strong><small>Thời gian tạo: {selected.created_at ? dateLabel(selected.created_at, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</small></span></div>
-            <div className="schedule-notes"><strong>Ghi chú</strong><p>{selected.notes || 'Không có ghi chú.'}</p></div>
+            <div className="schedule-notes">
+              <div className="schedule-notes-head">
+                <strong>Ghi chú</strong>
+                {(isAdmin || (isEmployee && Number(selected.assigned_to) === Number(user.id))) && !editingNote && (
+                  <button
+                    type="button"
+                    className="schedule-notes-btn"
+                    onClick={() => { setNoteText(selected.notes || ''); setEditingNote(true); }}
+                    title="Chỉnh sửa ghi chú"
+                  >
+                    <Pencil size={12}/>{selected.notes ? 'Sửa ghi chú' : 'Thêm ghi chú'}
+                  </button>
+                )}
+              </div>
+              {editingNote ? (
+                <div className="schedule-notes-editor">
+                  <textarea
+                    rows="3"
+                    maxLength="5000"
+                    value={noteText}
+                    onChange={e => setNoteText(e.target.value)}
+                    placeholder="Nhập ghi chú cho chuyến công tác..."
+                    autoFocus
+                  />
+                  <div className="schedule-notes-editor-actions">
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => setEditingNote(false)}
+                      disabled={savingNote}
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => saveQuickNote(selected)}
+                      disabled={savingNote}
+                    >
+                      {savingNote ? 'Đang lưu…' : 'Lưu ghi chú'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p>{selected.notes || 'Không có ghi chú.'}</p>
+              )}
+            </div>
             {(() => {
               const canEditThis = isAdmin || (isEmployee && Number(selected.assigned_to) === Number(user.id));
               if (canEditThis) {

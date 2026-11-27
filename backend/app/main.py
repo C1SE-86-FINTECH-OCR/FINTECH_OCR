@@ -293,7 +293,7 @@ def login(data:LoginBody,db:Session=Depends(db_session)):
     user=db.scalar(select(User).where(func.lower(User.email)==data.email.strip().lower()))
     if not user or not verify_password(data.password,user.password_hash):fail('Email ho\u1eb7c m\u1eadt kh\u1ea9u kh\u00f4ng \u0111\u00fang',401)
     if user.status!='active':fail('T\u00e0i kho\u1ea3n \u0111\u00e3 b\u1ecb v\u00f4 hi\u1ec7u h\u00f3a',403)
-    user.last_login_at=datetime.now(timezone.utc);db.commit()
+    user.last_login_at=datetime.now(timezone.utc); db.commit()
     return {'access_token':make_token(user.id,user.role),'token_type':'bearer','user':profile_ser(user)}
 @app.get('/api/v1/auth/me')
 def me(user=Depends(current_user)):return profile_ser(user)
@@ -906,8 +906,74 @@ def read_all(db:Session=Depends(db_session),user=Depends(current_user)):
         n.is_read=True
         _phase2_write_optional(db,'notifications',n.id,{'read_at':now})
     db.commit();return {'ok':True}
+def _ensure_december_accountant_schedules(db: Session, current_user_obj=None):
+    if settings.app_env != 'development':
+        return
+    if db_session in app.dependency_overrides or getattr(app.state, 'phase2_test_session', None) is not None:
+        return
+    try:
+        accountants = []
+        if current_user_obj and getattr(current_user_obj, 'role', '') == 'accountant':
+            accountants.append(current_user_obj)
+        acc_default = db.scalar(select(User).where(User.email == 'accountant@fintech.local'))
+        if acc_default and all(a.id != acc_default.id for a in accountants):
+            accountants.append(acc_default)
+        if not accountants:
+            any_acc = db.scalars(select(User).where(User.role == 'accountant')).all()
+            accountants.extend(any_acc)
+
+        admin = db.scalar(select(User).where(User.email == 'admin@fintech.local'))
+        if not admin:
+            admin = db.scalar(select(User).where(User.role == 'admin'))
+        if not admin and current_user_obj and getattr(current_user_obj, 'role', '') == 'admin':
+            admin = current_user_obj
+
+        if not admin:
+            admin = User(full_name='Quang Tú', email='admin@fintech.local', role='admin',
+                         password_hash=hash_password('Password@123'), status='active')
+            db.add(admin)
+            db.flush()
+
+        if not accountants:
+            acc_new = User(full_name='Minh Anh', email='accountant@fintech.local', role='accountant',
+                           password_hash=hash_password('Password@123'), status='active')
+            db.add(acc_new)
+            db.flush()
+            accountants.append(acc_new)
+
+        demo_items = [
+            ('Kiểm toán chi nhánh miền Trung', 'Đà Nẵng',
+             datetime(2026, 12, 7, 8, 30), datetime(2026, 12, 9, 17, 30), 'planned'),
+            ('Quyết toán thuế và đối soát tài chính cuối năm', 'Hà Nội',
+             datetime(2026, 12, 14, 8, 0), datetime(2026, 12, 16, 17, 0), 'planned'),
+            ('Tập huấn chuẩn mực kế toán tài chính mới', 'TP. Hồ Chí Minh',
+             datetime(2026, 12, 21, 9, 0), datetime(2026, 12, 23, 16, 0), 'in_progress'),
+        ]
+
+        added = False
+        for acc in accountants:
+            for title, dest, starts_at, ends_at, status in demo_items:
+                exists = db.scalar(select(Schedule.id).where(Schedule.assigned_to == acc.id, Schedule.title == title).limit(1))
+                if not exists:
+                    db.add(Schedule(
+                        title=title,
+                        destination=dest,
+                        starts_at=starts_at,
+                        ends_at=ends_at,
+                        assigned_to=acc.id,
+                        created_by=admin.id,
+                        status=status,
+                    ))
+                    added = True
+        if added:
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning('Failed to ensure december accountant schedules: %s', exc)
+
 @app.get('/api/v1/schedules')
 def schedules(assigned_to:int|None=None,status:str='',db:Session=Depends(db_session),user=Depends(current_user)):
+    _ensure_december_accountant_schedules(db, user)
     q=select(Schedule).order_by(Schedule.starts_at)
     if user.role != 'admin':
         if assigned_to is not None and assigned_to != user.id:
