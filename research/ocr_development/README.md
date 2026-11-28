@@ -10,9 +10,9 @@ Các thư mục `backend/app`, `backend/tools/ocr_benchmark` và `web/src` ở g
 
 - `current/`: nguồn phát triển mới nhất lấy từ working tree gốc, gồm Upload/Invoice Review, parser PDF/ảnh/XML, OpenCV, Hybrid V8 Final, trích xuất bảng nhiều trang, Evidence Merge, confidence và worker PaddleOCR cục bộ. Giữ cấu trúc đường dẫn để đối chiếu; không chép đè lên runtime.
 - `variants/ollama/`: adapter Ollama đã viết trước đây, lấy từ phần untracked của stash tương ứng. Chưa được đăng ký vào runtime hiện tại; không tải model hoặc gọi dịch vụ khi lưu trữ.
-- `history/`: năm patch khác nhau của các thay đổi OCR trong bảy stash. Các stash có nội dung giống nhau được tham chiếu chung, không áp dụng nối tiếp. Không chứa nội dung các file đã quyết định xóa.
-- `documents/`: tài liệu kỹ thuật, checkpoint và kết quả nghiên cứu lịch sử. Đường dẫn máy và địa chỉ email đã được lược bỏ. Đây không phải bằng chứng nghiệm thu phiên bản hiện tại; liên kết đến dữ liệu cục bộ hoặc kiểm thử đã xóa chỉ còn giá trị lịch sử.
-- `inventory.json`: nguồn gốc, checksum, phân loại thay đổi và quyết định đối với từng stash. Hash ở đây dùng để kiểm tra nguồn lưu trữ, không thay thế baseline G13 đã được phê duyệt.
+- Lịch sử patch và các tài liệu kiểm thử/checkpoint trung gian đã được dọn khỏi cây thư mục hiện tại. Bản lưu trữ trước dọn dẹp vẫn truy xuất được tại [commit 2fc6983](https://github.com/C1SE-86-FINTECH-OCR/FINTECH_OCR/tree/2fc6983b9148224f37bc2cdc50f6baea4cd077f3/research/ocr_development).
+- `documents/`: giữ báo cáo kỹ thuật, kết quả benchmark và tài liệu nghiên cứu có giá trị cho việc tiếp tục phát triển. Các liên kết lịch sử tới hồ sơ đã dọn hoặc dữ liệu cục bộ có thể không còn trong cây hiện tại; xem commit lưu trữ ở trên. Các kết quả lịch sử không phải bằng chứng nghiệm thu hiện tại.
+- `inventory.json`: danh mục nguồn nghiên cứu còn giữ, checksum và danh sách 55 đường dẫn đã dọn trước đó; hồ sơ đối chiếu chi tiết nằm tại commit lưu trữ trước dọn dẹp.
 
 ## Dependency và giới hạn
 
