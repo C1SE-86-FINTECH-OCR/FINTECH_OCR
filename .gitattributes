@@ -1,0 +1,4 @@
+# Preserve archived source bytes and patch context for reproducible comparison.
+research/ocr_development/current/** -text -whitespace
+research/ocr_development/variants/** -text -whitespace
+research/ocr_development/history/*.patch -text -whitespace

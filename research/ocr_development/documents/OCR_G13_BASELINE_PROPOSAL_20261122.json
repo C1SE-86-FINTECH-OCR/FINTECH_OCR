@@ -1,0 +1,1588 @@
+{
+  "document_type": "G13_BASELINE_PROPOSAL_ONLY",
+  "proposal_status": "PENDING APPROVAL",
+  "date_local": "2026-11-22",
+  "repository": "<LOCAL_PATH>",
+  "branch": "feature/thien",
+  "head": "26bc332ae5954da7149ab3904f97d4b6313d6ab2",
+  "source_identity": "Snapshot bytes working tree, gồm thay đổi sau commit. HEAD không đại diện toàn bộ snapshot.",
+  "active_gate": {
+    "path": "<LOCAL_PATH>",
+    "sha256": "c78250c6c4ea5dfc2f240a2a031e107268e296311697e16919e96571b4aab2a5",
+    "historical_status": "PASS_TECHNICAL_REGRESSION_NOT_NFR",
+    "modified": false
+  },
+  "old_gate_files": [
+    {
+      "path": "backend/app/core.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "ee4293f0160b634527a82266b5305104c6425eb3356d40013e7560a7b9b72015",
+      "current_sha256": "ee4293f0160b634527a82266b5305104c6425eb3356d40013e7560a7b9b72015",
+      "comparison": "MATCH",
+      "purpose": "Cấu hình pipeline và validator chỉ cho Hybrid trong testing.",
+      "ocr_fallback_impact": "Giữ current mặc định; chặn Final ngoài testing.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "ee4293f0160b634527a82266b5305104c6425eb3356d40013e7560a7b9b72015"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "from datetime import datetime, timedelta, timezone"
+        },
+        {
+          "line": 2,
+          "text": "from pathlib import Path"
+        },
+        {
+          "line": 3,
+          "text": "from typing import Generator"
+        }
+      ]
+    },
+    {
+      "path": "backend/app/main.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "3946f5cb5e12b1abbf8d557aaf74d6879bf39e3a1dac950110fc76f0ba9737a4",
+      "current_sha256": "2750d0dc9c012ecaca0f5c35ecf019da51b88a83cdbdf717a78f46f4a7203c55",
+      "comparison": "CHANGED",
+      "purpose": "Nhận JPEG qua nhánh JPG; điều phối upload và trả metadata.",
+      "ocr_fallback_impact": "Gọi OCR theo cấu hình, lưu Invoice/InvoiceItem/ExtractionRun.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "2750d0dc9c012ecaca0f5c35ecf019da51b88a83cdbdf717a78f46f4a7203c55"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "from contextlib import asynccontextmanager"
+        },
+        {
+          "line": 2,
+          "text": "from datetime import datetime, timezone, date"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/app/ocr_runtime.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "7644ad0c7ed8595726858679dd8acc9977d077a0a5dea548ed53db6d5286d8f0",
+      "current_sha256": "2c63fbfa8ab8c992d55fb9cc5a3eae4c1e0cf266d366adc916abc7201c28a893",
+      "comparison": "CHANGED",
+      "purpose": "Ánh xạ kết quả, kiểm tra JSON; phục hồi snapshot V8 nếu đầu ra Final lỗi.",
+      "ocr_fallback_impact": "Giữ V8 hợp lệ; ghi used_pipeline/reason; dự phòng ngoài cùng về current khi được bật.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "2c63fbfa8ab8c992d55fb9cc5a3eae4c1e0cf266d366adc916abc7201c28a893"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from dataclasses import dataclass"
+        },
+        {
+          "line": 7,
+          "text": "from datetime import date"
+        },
+        {
+          "line": 8,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/refine_v8.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "857ff8e1f4362af617f89c84ca870d8a0dff0b6d4248cad47a6b04a836844cea",
+      "current_sha256": "d4b3a9e47867c639a52f87377394d33bc7193eff88e14d789d3eb2f9d5b4564d",
+      "comparison": "CHANGED",
+      "purpose": "Nối helper nhãn, nguồn, vai trò MST, chọn trường và ghép dòng.",
+      "ocr_fallback_impact": "Kiểm soát liên kết dòng/trang, giữ null và cảnh báo mâu thuẫn.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "d4b3a9e47867c639a52f87377394d33bc7193eff88e14d789d3eb2f9d5b4564d"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 4,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/hybrid_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "740345d1e97e508b188b8bebec5bc2f59928a81f6fde36d1c73a62dcf036ddd6",
+      "current_sha256": "fcf6515ab710504e63e8b8999cda4b6b1f1664dc920355441592c97b5284a813",
+      "comparison": "CHANGED",
+      "purpose": "Điều phối theo trang, kiểm tra frame, giữ baseline, thu bằng chứng.",
+      "ocr_fallback_impact": "Lỗi Final giữ V8 của cùng tài liệu hoặc từng trang.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "fcf6515ab710504e63e8b8999cda4b6b1f1664dc920355441592c97b5284a813"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 7,
+          "text": "from math import ceil, floor, isfinite"
+        },
+        {
+          "line": 8,
+          "text": "from time import perf_counter"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_ocr_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "80901f1702cc389499f6f56b5ce6eef3c23501103765377ac5b0c3fa66b46dad",
+      "current_sha256": "80901f1702cc389499f6f56b5ce6eef3c23501103765377ac5b0c3fa66b46dad",
+      "comparison": "MATCH",
+      "purpose": "Mã kiểm thử G13 có sẵn; hash vẫn khớp baseline.",
+      "ocr_fallback_impact": "Chưa chứng minh bao phủ đủ nhánh Final bổ sung sau G13.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "80901f1702cc389499f6f56b5ce6eef3c23501103765377ac5b0c3fa66b46dad"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 3,
+          "text": "import pytest"
+        },
+        {
+          "line": 4,
+          "text": "from pydantic import ValidationError"
+        }
+      ]
+    },
+    {
+      "path": "web/src/ocrRuntimeInfo.js",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "0728109483b91618201eecb57ed898d7aec4111fb2936469757a0cfcc0826d76",
+      "current_sha256": "545f5450ea5d70432b958e300febaadce19eb8a748a66076c0b5aa0afca4359b",
+      "comparison": "CHANGED",
+      "purpose": "Thông báo mới khi Final giữ kết quả V8.",
+      "ocr_fallback_impact": "Hiển thị lý do v8_baseline_retained; chưa xác minh Browser bản mới.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "545f5450ea5d70432b958e300febaadce19eb8a748a66076c0b5aa0afca4359b"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "export function ocrRuntimeNotice(ocr) {"
+        },
+        {
+          "line": 11,
+          "text": "export function completenessLabel(value) {"
+        }
+      ]
+    },
+    {
+      "path": "web/tests/ocrRuntimeInfo.test.js",
+      "absolute_path": "<LOCAL_PATH>",
+      "baseline_sha256": "e452f8eae62405b90f94b97375cff186a19b1a22671af9a9b6c340d70c96d815",
+      "current_sha256": "e452f8eae62405b90f94b97375cff186a19b1a22671af9a9b6c340d70c96d815",
+      "comparison": "MATCH",
+      "purpose": "Mã kiểm thử thông báo cũ; hash vẫn khớp baseline.",
+      "ocr_fallback_impact": "Chưa có bằng chứng xác minh nhánh thông báo V8 mới.",
+      "evidence": [
+        "docs/OCR_TASK2_FINAL_REPORT.md",
+        "docs/OCR_PHASE13_CHECKPOINT.md",
+        "docs/OCR_TASK2_CONTINUATION_20261122.md",
+        "docs/OCR_TASK2_IMPLEMENTATION_20261122.md"
+      ],
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "e452f8eae62405b90f94b97375cff186a19b1a22671af9a9b6c340d70c96d815"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "import test from 'node:test';"
+        },
+        {
+          "line": 2,
+          "text": "import assert from 'node:assert/strict';"
+        },
+        {
+          "line": 3,
+          "text": "import { completenessLabel, ocrRuntimeNotice } from '../src/ocrRuntimeInfo.js';"
+        }
+      ]
+    }
+  ],
+  "additional_candidate_files": [
+    {
+      "path": "backend/tools/ocr_benchmark/source_links_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "378807d024db69abbab92a96d69b76f896030b4912f9faead52035d10d58dfaf",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "NEW FINAL DEPENDENCY",
+      "purpose": "Helper mới được Final/refine gọi, chưa được khóa trong Gate cũ.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "378807d024db69abbab92a96d69b76f896030b4912f9faead52035d10d58dfaf"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "import re"
+        },
+        {
+          "line": 7,
+          "text": "from decimal import Decimal, InvalidOperation"
+        },
+        {
+          "line": 8,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/document_fields_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "de5f7c2c3dc4a30955d1984075d531edcb810d0c840af217914839fc4d6203c9",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "NEW FINAL DEPENDENCY",
+      "purpose": "Helper mới được Final/refine gọi, chưa được khóa trong Gate cũ.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "de5f7c2c3dc4a30955d1984075d531edcb810d0c840af217914839fc4d6203c9"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import re"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal, InvalidOperation"
+        },
+        {
+          "line": 5,
+          "text": "from . import pipeline_v4 as context"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/table_state_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "35fb31e36875bdb3bf19e075c76cedf85476f4c9736e594037346b18ddec00fe",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "NEW FINAL DEPENDENCY",
+      "purpose": "Helper mới được Final/refine gọi, chưa được khóa trong Gate cũ.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "35fb31e36875bdb3bf19e075c76cedf85476f4c9736e594037346b18ddec00fe"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import re"
+        },
+        {
+          "line": 3,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 4,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/review_v8_final.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "0cb4384518bd1755e9f9e667e6f36ef6defc38d0b154f0361efcdc9b89d98ec2",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "NEW FINAL DEPENDENCY",
+      "purpose": "Helper mới được Final/refine gọi, chưa được khóa trong Gate cũ.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "0cb4384518bd1755e9f9e667e6f36ef6defc38d0b154f0361efcdc9b89d98ec2"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal, InvalidOperation"
+        },
+        {
+          "line": 5,
+          "text": "from .document_fields_v8_final import target_observations"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/__init__.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "980ccf2960c85f8a290c6a6170e3726480cca87328661fad66e951763c0d3654",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "980ccf2960c85f8a290c6a6170e3726480cca87328661fad66e951763c0d3654"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/hybrid_v6.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "b78198d551f0fb326e3a7ae1e4e189cdce1d73d3886369a3e6699dc1f6abd36c",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "b78198d551f0fb326e3a7ae1e4e189cdce1d73d3886369a3e6699dc1f6abd36c"
+      },
+      "source_review_entry": [
+        {
+          "line": 7,
+          "text": "from collections import Counter"
+        },
+        {
+          "line": 8,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 9,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/hybrid_v7.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "f548f47781bc5c03875536db9ebff968c6993524ac41546c9bcd406075f66586",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "f548f47781bc5c03875536db9ebff968c6993524ac41546c9bcd406075f66586"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 7,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 8,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/hybrid_v8.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "b66fddadc8d2adee89890ac6272a0438533ad0eb8303886f4636e50563aac43d",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "b66fddadc8d2adee89890ac6272a0438533ad0eb8303886f4636e50563aac43d"
+      },
+      "source_review_entry": [
+        {
+          "line": 5,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 6,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 7,
+          "text": "from difflib import SequenceMatcher"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/pipeline_v4.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "19998bc1dd0c24adf1323e268fc3d736efc0d8f509632883ce3309474d0a5961",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "19998bc1dd0c24adf1323e268fc3d736efc0d8f509632883ce3309474d0a5961"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from dataclasses import dataclass"
+        },
+        {
+          "line": 7,
+          "text": "from datetime import date"
+        },
+        {
+          "line": 8,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/pipeline_v5.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "4c0ea2e5b6594aa8cafd01084dfe1d272b8bcd7c6069cbb9d63e81744a3daa90",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "4c0ea2e5b6594aa8cafd01084dfe1d272b8bcd7c6069cbb9d63e81744a3daa90"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from collections import Counter, deque"
+        },
+        {
+          "line": 7,
+          "text": "from dataclasses import dataclass"
+        },
+        {
+          "line": 8,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/fields_v7.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "f8e79ac85bd8d6f13a195a503812d4d116978f5e108c33dbb59c8ee9c62ff9bc",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "f8e79ac85bd8d6f13a195a503812d4d116978f5e108c33dbb59c8ee9c62ff9bc"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import re"
+        },
+        {
+          "line": 3,
+          "text": "from . import pipeline_v4 as v4, pipeline_v5 as v5"
+        },
+        {
+          "line": 4,
+          "text": "from .table_v3 import row_evidence"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/fields_v8.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "2f84c227940a5e0eb1bfc29b378d6e8a2d0a542ee07d12bcd396861b2ebc74d5",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "2f84c227940a5e0eb1bfc29b378d6e8a2d0a542ee07d12bcd396861b2ebc74d5"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import re"
+        },
+        {
+          "line": 3,
+          "text": "import unicodedata"
+        },
+        {
+          "line": 4,
+          "text": "from . import pipeline_v4 as v4, pipeline_v5 as v5"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/table_v3.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "3bdaced70ac55603fe2bba9bb1156e1b91e474e3cdd071979f7231d85bafa621",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "3bdaced70ac55603fe2bba9bb1156e1b91e474e3cdd071979f7231d85bafa621"
+      },
+      "source_review_entry": [
+        {
+          "line": 3,
+          "text": "from dataclasses import dataclass"
+        },
+        {
+          "line": 4,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 5,
+          "text": "from io import BytesIO"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/table_v6.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "1bad31c95d961601e50d543a52197fa7bb0496b688d211812b3905548294608e",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "1bad31c95d961601e50d543a52197fa7bb0496b688d211812b3905548294608e"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 3,
+          "text": "from difflib import SequenceMatcher"
+        },
+        {
+          "line": 4,
+          "text": "import re"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/table_v7.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "f2d0c5f36f67e37c0f8445d82c42f303f8610ea471b641b1084bfd7ba8cf57c9",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "f2d0c5f36f67e37c0f8445d82c42f303f8610ea471b641b1084bfd7ba8cf57c9"
+      },
+      "source_review_entry": [
+        {
+          "line": 7,
+          "text": "from collections import Counter"
+        },
+        {
+          "line": 8,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 9,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/table_v8.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "663b9e7faf730f9cc1bc19377add9d993ef101f530941332cce97f7b01c5f8b8",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "663b9e7faf730f9cc1bc19377add9d993ef101f530941332cce97f7b01c5f8b8"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 4,
+          "text": "from itertools import product"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/layout.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "1e6fd82c395806a719857a754c912186842050efb57b9cbc1112d101ecbf446d",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "1e6fd82c395806a719857a754c912186842050efb57b9cbc1112d101ecbf446d"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "from dataclasses import asdict, dataclass"
+        },
+        {
+          "line": 2,
+          "text": "from io import BytesIO"
+        },
+        {
+          "line": 3,
+          "text": "from statistics import median"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/preprocess_v8.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "011aa3ce1ff987f23589907f3ad3495a0a15906edac67eea98d0735025826af8",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "011aa3ce1ff987f23589907f3ad3495a0a15906edac67eea98d0735025826af8"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from PIL import ImageOps,ImageFilter"
+        },
+        {
+          "line": 3,
+          "text": "from . import pipeline_v5 as v5"
+        },
+        {
+          "line": 5,
+          "text": "def views(image):"
+        }
+      ]
+    },
+    {
+      "path": "backend/tools/ocr_benchmark/profiling.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "f1168d8b14eaac4c44cad1eec532290014330541a0f6f2d8860d7fdb6db179fd",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "RUNTIME DEPENDENCY",
+      "purpose": "Phụ thuộc runtime trực tiếp hoặc gián tiếp của Final và baseline V8; cần cố định cùng phiên bản.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "f1168d8b14eaac4c44cad1eec532290014330541a0f6f2d8860d7fdb6db179fd"
+      },
+      "source_review_entry": [
+        {
+          "line": 6,
+          "text": "from contextlib import contextmanager"
+        },
+        {
+          "line": 7,
+          "text": "from contextvars import ContextVar"
+        },
+        {
+          "line": 8,
+          "text": "from functools import wraps"
+        }
+      ]
+    },
+    {
+      "path": "backend/app/extraction.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "c878ec80cb32e1d2f8dada0329e70c6bf4eed708246dcef0ef1b108c094c3218",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "BACKEND CONTRACT",
+      "purpose": "OCR/XML/current fallback, model, schema và thư viện ảnh hưởng cấu trúc kết quả.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "c878ec80cb32e1d2f8dada0329e70c6bf4eed708246dcef0ef1b108c094c3218"
+      },
+      "source_review_entry": [
+        {
+          "line": 7,
+          "text": "from __future__ import annotations"
+        },
+        {
+          "line": 9,
+          "text": "import io"
+        },
+        {
+          "line": 10,
+          "text": "import os"
+        }
+      ]
+    },
+    {
+      "path": "backend/app/models.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "15c4672f1fcb6437be3d55b04cd5e220736acdc7f134ceebcb2dc27a3d045f46",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "BACKEND CONTRACT",
+      "purpose": "OCR/XML/current fallback, model, schema và thư viện ảnh hưởng cấu trúc kết quả.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "15c4672f1fcb6437be3d55b04cd5e220736acdc7f134ceebcb2dc27a3d045f46"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "from datetime import datetime,timezone,date"
+        },
+        {
+          "line": 2,
+          "text": "from sqlalchemy import String,Integer,ForeignKey,DateTime,Date,Numeric,Text,Boolean,Float,UniqueConstraint,JSON,LargeBinary"
+        },
+        {
+          "line": 3,
+          "text": "from sqlalchemy.orm import Mapped,mapped_column,relationship"
+        }
+      ]
+    },
+    {
+      "path": "backend/requirements.txt",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "b199aa7ede4751492287a22f7f8cb10558cb927355d9ccc7a3b6f73acd42c7e5",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "BACKEND CONTRACT",
+      "purpose": "OCR/XML/current fallback, model, schema và thư viện ảnh hưởng cấu trúc kết quả.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "b199aa7ede4751492287a22f7f8cb10558cb927355d9ccc7a3b6f73acd42c7e5"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "web/src/InvoiceDetailPage.jsx",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "8d8537567508f17aa42104edeeb03dec1edae97946cdb6b4852f79cc6ff3fd9d",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "8d8537567508f17aa42104edeeb03dec1edae97946cdb6b4852f79cc6ff3fd9d"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "import React, { useEffect, useState } from 'react';"
+        },
+        {
+          "line": 2,
+          "text": "import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Plus, Save, Trash2 } from 'lucide-react';"
+        },
+        {
+          "line": 3,
+          "text": "import { api, approvalName, datefmt, documentTypeName } from './api';"
+        }
+      ]
+    },
+    {
+      "path": "web/src/InvoiceDetailPage.css",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "9e07d470093df7b353c75e216ac32879bc98a848d8cdd6ba10e89069479e6341",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "9e07d470093df7b353c75e216ac32879bc98a848d8cdd6ba10e89069479e6341"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "web/src/viewUtils.js",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "bc43633718f91ed15fb12de1fa04acf0d2c896ca7900f9a2335d9f1132006a53",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "bc43633718f91ed15fb12de1fa04acf0d2c896ca7900f9a2335d9f1132006a53"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "export function moneyOrDash(value) {"
+        },
+        {
+          "line": 8,
+          "text": "export function invoiceItemDrafts(items) {"
+        },
+        {
+          "line": 24,
+          "text": "export function invoiceItemPayload(items) {"
+        }
+      ]
+    },
+    {
+      "path": "web/src/api.js",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "f527400d83087090c9cfa364853cbfd07a19fba37b95dc71f75fc90f57eda1e3",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "f527400d83087090c9cfa364853cbfd07a19fba37b95dc71f75fc90f57eda1e3"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "web/src/lookupUtils.js",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "6313fa220cc4e3452a677ebd365268f37ba9d93d91fbf2d91ad01cfc1b9fa5b7",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "6313fa220cc4e3452a677ebd365268f37ba9d93d91fbf2d91ad01cfc1b9fa5b7"
+      },
+      "source_review_entry": [
+        {
+          "line": 3,
+          "text": "export function isSafeHttpUrl(value) {"
+        },
+        {
+          "line": 17,
+          "text": "export function formatLookupTimestamp(value) {"
+        }
+      ]
+    },
+    {
+      "path": "web/package.json",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "2153c8f9fa5153ce4fd5655c3475806a7f725e8149454f7c5363a125a2e3b825",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "2153c8f9fa5153ce4fd5655c3475806a7f725e8149454f7c5363a125a2e3b825"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "web/package-lock.json",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "e5da0a1627e4412d72c04bff93c8158b774a0fe34b6993038044b5cf767456b4",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "WEB CONTRACT",
+      "purpose": "Hiển thị findings, null/0, đơn vị, edit và thư viện của trang chi tiết.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "e5da0a1627e4412d72c04bff93c8158b774a0fe34b6993038044b5cf767456b4"
+      },
+      "source_review_entry": []
+    },
+    {
+      "path": "backend/tests/test_ocr_final_source_links.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "36429b45b689508b19dc56a31caf9dc018642042f8af378156733c46ad1dfae2",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "36429b45b689508b19dc56a31caf9dc018642042f8af378156733c46ad1dfae2"
+      },
+      "source_review_entry": [
+        {
+          "line": 5,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 7,
+          "text": "import pytest"
+        },
+        {
+          "line": 9,
+          "text": "from tools.ocr_benchmark import refine_v8 as refine"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_ocr_runtime.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "79185a6c150027d2e7f2ac9b0b0106f2863298a3285d2cb3df85d2e0b4450f91",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "79185a6c150027d2e7f2ac9b0b0106f2863298a3285d2cb3df85d2e0b4450f91"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 2,
+          "text": "from datetime import date"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_phase8_runtime_api.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "4d078005a8ebe36f8940541a8039b226950e9fba38fa40c85fbd7436fbdea5a9",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "4d078005a8ebe36f8940541a8039b226950e9fba38fa40c85fbd7436fbdea5a9"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import hashlib"
+        },
+        {
+          "line": 3,
+          "text": "from copy import deepcopy"
+        },
+        {
+          "line": 4,
+          "text": "from io import BytesIO"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_phase9_runtime_api.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "e97ccb97a3b833272d8fde7d7d1237fd353858b8cbc945585ab4f66071df781e",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "e97ccb97a3b833272d8fde7d7d1237fd353858b8cbc945585ab4f66071df781e"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import pytest"
+        },
+        {
+          "line": 3,
+          "text": "from app import ocr_runtime"
+        },
+        {
+          "line": 4,
+          "text": "import app.core as core"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_phase11_runtime_api.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "8f7201a8e446637203ee4aa25495cdd0dd27838dbeac69dfc81a0f1e74c7c9fc",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "8f7201a8e446637203ee4aa25495cdd0dd27838dbeac69dfc81a0f1e74c7c9fc"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "import pytest"
+        },
+        {
+          "line": 3,
+          "text": "from pydantic import ValidationError"
+        },
+        {
+          "line": 4,
+          "text": "from app import core,ocr_runtime"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_phase2_api.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "29ed5b5872d1ac476830958f968cb4ac63a26ba1e310f5d1ff9be4a82d573835",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "29ed5b5872d1ac476830958f968cb4ac63a26ba1e310f5d1ff9be4a82d573835"
+      },
+      "source_review_entry": [
+        {
+          "line": 1,
+          "text": "import asyncio"
+        },
+        {
+          "line": 2,
+          "text": "import hashlib"
+        },
+        {
+          "line": 3,
+          "text": "import json"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/test_extraction.py",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "d0050b807cb94434dc7e3c77fa834eca1a5ce43a068e9e9a26de32a7c8965225",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "d0050b807cb94434dc7e3c77fa834eca1a5ce43a068e9e9a26de32a7c8965225"
+      },
+      "source_review_entry": [
+        {
+          "line": 2,
+          "text": "from datetime import date"
+        },
+        {
+          "line": 3,
+          "text": "from decimal import Decimal"
+        },
+        {
+          "line": 4,
+          "text": "from io import BytesIO"
+        }
+      ]
+    },
+    {
+      "path": "backend/tests/fixtures/uat9f.xml",
+      "absolute_path": "<LOCAL_PATH>",
+      "current_sha256": "a2dc7df221e5ebb7a0efed14061f19e580c2e7c0cd717db96fa5e3f052c62b70",
+      "baseline_sha256": null,
+      "baseline_note": "Không có trong source_hashes của Gate G13 cũ; chưa có baseline G13 cho tệp này.",
+      "scope": "VERIFICATION SUPPORT",
+      "purpose": "Mã kiểm thử/fixture cần xác định phiên bản trong hồ sơ bằng chứng; chưa thực thi.",
+      "current_execution_verification": "NOT VERIFIED",
+      "snapshot_recheck": {
+        "status": "MATCHES PROPOSAL",
+        "sha256": "a2dc7df221e5ebb7a0efed14061f19e580c2e7c0cd717db96fa5e3f052c62b70"
+      },
+      "source_review_entry": []
+    }
+  ],
+  "existing_evidence": [
+    {
+      "workspace_path": "ocr_task2_final/OFFLINE_GATE.json",
+      "sha256": "c78250c6c4ea5dfc2f240a2a031e107268e296311697e16919e96571b4aab2a5"
+    },
+    {
+      "workspace_path": "ocr_task2_final/STATUS.json",
+      "sha256": "b2a631c19ef7f5e7c8ed26e3b425ff1efdddbfc11a5bb8a8904745437890eb15"
+    },
+    {
+      "workspace_path": "ocr_task2_final/COMPARISON.json",
+      "sha256": "4970be12a10852edc551be036ed01c627b2d3756c7b4fb2101d28f0ae021d25c"
+    },
+    {
+      "workspace_path": "ocr_task2_final/backend-tests.xml",
+      "sha256": "7504a61937cdb1353beba7dd4dfd64b2237ccc8ea4be6c80ed070e79aff53af0"
+    },
+    {
+      "workspace_path": "ocr_task2_final/backend-tests.log",
+      "sha256": "851d9bf66fc61f198c77b0e1c078ae73bb7d340905385dff8cfcdc07b9bd869c"
+    },
+    {
+      "workspace_path": "ocr_task2_final/web-tests.log",
+      "sha256": "9aae33a1b28c48b67621f6c65cf0da4c343333b0358875aa0aeda41322b64a27"
+    },
+    {
+      "workspace_path": "ocr_task2_final/build.log",
+      "sha256": "36e562b2e2d1bfaf15608df7a11103695142fe3fde4fdc3c2a83eb747d16eee2"
+    },
+    {
+      "workspace_path": "ocr_task2_final/uat/BROWSER_UAT.json",
+      "sha256": "2915ef83778c13805fd4991914c8e994603d8728e0db6b58b4f0652ccfe4041f"
+    },
+    {
+      "workspace_path": "ocr_task2_final/uat/DB_FINAL_CHECK.json",
+      "sha256": "7f601a17881d76c3bf0d984e406c544503cf3cc374190a809aaa376c1420e258"
+    },
+    {
+      "workspace_path": "ocr_task2_continuation_20261122/IMPLEMENTATION_REVIEW.json",
+      "sha256": "f5df35d3c0970e7bc9a6a969af2ad25d45c2dbb34bd1468e3ff19c04cfcbb898"
+    },
+    {
+      "workspace_path": "ocr_task2_implementation_20261122/IMPLEMENTATION_STATUS.json",
+      "sha256": "1b28eebc2b614918b6de02f04d9befbdfff2d9ae95401885e1bff8cfe5df9d3c"
+    },
+    {
+      "workspace_path": "TASK2_COMMIT_AUDIT_20261122/AFTER.json",
+      "sha256": "db573171d3e99a471203827b1efba3a666933fc57d8ccbc363b70716f0a52771"
+    }
+  ],
+  "approval": {
+    "approved_by": null,
+    "approved_at": null,
+    "decision": null
+  },
+  "verification": {
+    "status": "PENDING",
+    "executed_in_this_session": false,
+    "results_for_this_snapshot": []
+  },
+  "activation": {
+    "status": "BLOCKED",
+    "source_default": "current",
+    "development_allowed_by_current_validator": false,
+    "required_configuration_after_approval": {
+      "APP_ENV": "development",
+      "OCR_PIPELINE": "hybrid_v8_final",
+      "OCR_HYBRID_FALLBACK": "true"
+    },
+    "note": "Biến cấu hình này chưa đủ với validator hiện tại; cần phê duyệt giới hạn môi trường, đường startup có Gate và xác minh phiên bản sau sửa."
+  },
+  "acceptance": {
+    "final": "NOT VERIFIED",
+    "NFR01": "NOT INDEPENDENTLY ACCEPTED"
+  },
+  "format_note": "Tài liệu đề xuất dùng old_gate_files/additional_candidate_files; không có status PASS và source_hashes để thay trực tiếp OFFLINE_GATE.json.",
+  "static_review": {
+    "documentation_status": "READY FOR REVIEW WITH OPEN ITEMS",
+    "date_local": "2026-11-22",
+    "all_proposal_fields_read": true,
+    "source_snapshot_matches": 45,
+    "source_snapshot_total": 45,
+    "evidence_hashes_match": 12,
+    "active_gate_unchanged": true,
+    "old_gate_matches": 3,
+    "old_gate_changed": 5,
+    "judgment": "Nội dung triển khai có căn cứ mã nguồn. Chưa đủ bằng chứng để phê duyệt Gate đạt hoặc kích hoạt development.",
+    "change_evidence_matrix": [
+      {
+        "id": "C01",
+        "files": [
+          "backend/app/main.py"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "JPEG được chuẩn hóa về JPG rồi đi qua kiểm chữ ký và upload hiện có.",
+        "source_anchors": [
+          {
+            "path": "backend/app/main.py",
+            "line": 490,
+            "text": "if ext == 'jpeg':"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Biên nhận upload JPEG, kiểu tệp, metadata và kết quả đọc lại đúng phiên bản."
+      },
+      {
+        "id": "C02",
+        "files": [
+          "backend/app/ocr_runtime.py"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "Mapper/JSON lỗi ở Final dùng snapshot V8 có sẵn; used_pipeline và reason phản ánh giữ baseline.",
+        "source_anchors": [
+          {
+            "path": "backend/app/ocr_runtime.py",
+            "line": 95,
+            "text": "def _hybrid_result(pipeline, fields, items, layout):"
+          },
+          {
+            "path": "backend/app/ocr_runtime.py",
+            "line": 136,
+            "text": "snapshot = layout.get('v8_baseline') if pipeline == 'hybrid_v8_final' else None"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Bằng chứng các nhánh thành công, dữ liệu Final không lưu được, snapshot hợp lệ/không hợp lệ, fallback bật/tắt."
+      },
+      {
+        "id": "C03",
+        "files": [
+          "backend/tools/ocr_benchmark/refine_v8.py",
+          "backend/tools/ocr_benchmark/source_links_v8_final.py"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "Chọn trường theo nhãn và bằng chứng, xử lý xung đột và liên kết dòng một-một.",
+        "source_anchors": [
+          {
+            "path": "backend/tools/ocr_benchmark/refine_v8.py",
+            "line": 168,
+            "text": "def select_fields(fields, observations):"
+          },
+          {
+            "path": "backend/tools/ocr_benchmark/source_links_v8_final.py",
+            "line": 120,
+            "text": "def baseline_row_match(row, baseline, used):"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Kết quả cho nhãn tách dòng, vai trò MST/cột, dòng lặp, mã model, cùng amount khác sản phẩm và xung đột bằng chứng ngang nhau."
+      },
+      {
+        "id": "C04",
+        "files": [
+          "backend/tools/ocr_benchmark/hybrid_v8_final.py",
+          "backend/tools/ocr_benchmark/table_state_v8_final.py"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "Điều phối theo trang, đối chiếu raster và cột tiếp trang, giữ V8 theo trang/toàn tài liệu.",
+        "source_anchors": [
+          {
+            "path": "backend/tools/ocr_benchmark/hybrid_v8_final.py",
+            "line": 173,
+            "text": "raster_count_matches = len(rasters) == sum(p['source'] == 'ocr' for p in pages)"
+          },
+          {
+            "path": "backend/tools/ocr_benchmark/table_state_v8_final.py",
+            "line": 16,
+            "text": "def continuation_header(state, reads, page_number):"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Bằng chứng PDF text/scan hỗn hợp, thứ tự/trùng trang, thay frame/số chứng từ, lỗi riêng Final và giữ bảng không đếm hai lần."
+      },
+      {
+        "id": "C05",
+        "files": [
+          "backend/tools/ocr_benchmark/document_fields_v8_final.py",
+          "backend/tools/ocr_benchmark/review_v8_final.py"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "Nhãn tài chính, tiền phân nhóm nghìn bằng dấu cách, khoản điều chỉnh có nguồn; null không tự đổi thành 0.",
+        "source_anchors": [
+          {
+            "path": "backend/tools/ocr_benchmark/document_fields_v8_final.py",
+            "line": 58,
+            "text": "def observed_value(key, literal):"
+          },
+          {
+            "path": "backend/tools/ocr_benchmark/document_fields_v8_final.py",
+            "line": 102,
+            "text": "def financial_observations(reads, page):"
+          },
+          {
+            "path": "backend/tools/ocr_benchmark/review_v8_final.py",
+            "line": 8,
+            "text": "def review_summary(fields, rows, observations, findings, layout):"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Bằng chứng chuẩn hóa tiền/ngày, không gộp hai số cạnh nhau; nhiều VAT, discount/phụ phí không đổi sai tổng hoặc dòng hàng."
+      },
+      {
+        "id": "C06",
+        "files": [
+          "web/src/InvoiceDetailPage.jsx",
+          "web/src/ocrRuntimeInfo.js"
+        ],
+        "source_review": "SUPPORTED BY SOURCE",
+        "description": "Trang chi tiết hiển thị findings đã được API trả và thông báo giữ V8.",
+        "source_anchors": [
+          {
+            "path": "web/src/InvoiceDetailPage.jsx",
+            "line": 108,
+            "text": "{Array.isArray(data.ocr?.findings) && data.ocr.findings.length > 0 && <details className=\"ocr-review-note\">"
+          },
+          {
+            "path": "web/src/ocrRuntimeInfo.js",
+            "line": 6,
+            "text": "if (ocr.reason === 'v8_baseline_retained') return `Bước hoàn thiện của ${name} chưa cung cấp được kết quả sử dụng được. Hóa đơn giữ kết quả Hybrid V8 và cần được đối chiếu với chứng từ gốc.`;"
+          }
+        ],
+        "execution_evidence_for_snapshot": "MISSING",
+        "missing_evidence": "Bằng chứng hợp đồng API, hiển thị findings và reason giữ V8, null/0, dữ liệu sau lưu/tải lại và quyền truy cập đúng snapshot."
+      }
+    ],
+    "missing_evidence": [
+      {
+        "id": "E01",
+        "required_artifact": "Định danh môi trường và phiên bản thực thi",
+        "detail": "Hash nguồn đúng snapshot, phiên bản Python/Node/Tesseract, vie/eng và gói đã cài. requirements Backend dùng khoảng phiên bản; hash tệp requirements chưa xác định gói thực tế.",
+        "state": "MISSING"
+      },
+      {
+        "id": "E02",
+        "required_artifact": "Kết quả xác minh các thay đổi C01–C06",
+        "detail": "Kết quả có đầu vào/expected/actual, phạm vi, thời điểm và hash snapshot; gồm đường thành công và lỗi/fallback. Kết quả 441/37 cũ không đại diện bản mới.",
+        "state": "MISSING"
+      },
+      {
+        "id": "E03",
+        "required_artifact": "Đối chiếu kỳ vọng mã kiểm thử với logic hiện tại",
+        "detail": "Giải quyết hoặc được xem xét có lưu vết bất đồng R01 trước khi coi bộ bằng chứng hỗ trợ bản mới là đầy đủ.",
+        "state": "OPEN"
+      },
+      {
+        "id": "E04",
+        "required_artifact": "Bằng chứng tích hợp API/lưu/UI cho snapshot hiện tại",
+        "detail": "Invoice/InvoiceItem/ExtractionRun, findings, used_pipeline, correction và trạng thái độc lập. Hash browser/database cũ chỉ chứng minh tệp bằng chứng nguyên vẹn.",
+        "state": "MISSING"
+      },
+      {
+        "id": "E05",
+        "required_artifact": "Phạm vi và tiêu chí kỹ thuật được người có thẩm quyền chốt",
+        "detail": "Xác định tệp runtime cần khóa, hỗ trợ xác minh, tiêu chí chấp nhận và xử lý rủi ro tồn đọng. Danh sách 37 là đề xuất phạm vi, chưa được ký duyệt.",
+        "state": "PENDING APPROVAL"
+      },
+      {
+        "id": "E06",
+        "required_artifact": "Phương án và bằng chứng vận hành development",
+        "detail": "Quyết định cho phép development; phiên bản validator/loader được phép sau sửa, bằng chứng kiểm Gate, backup, upload và phạm vi dữ liệu. Chưa có bản sau sửa để xác minh.",
+        "state": "MISSING"
+      },
+      {
+        "id": "E07",
+        "required_artifact": "Quyết định phê duyệt baseline và kích hoạt",
+        "detail": "Người duyệt, thời điểm, quyết định, phạm vi/giới hạn, tham chiếu bằng chứng và hash của phiên bản được duyệt.",
+        "state": "NOT GRANTED"
+      }
+    ],
+    "open_risks": [
+      {
+        "id": "R01",
+        "level": "HIGH",
+        "description": "Bất đồng tĩnh giữa kỳ vọng ca xung đột ngang bằng và logic chọn trường.",
+        "source_anchors": [
+          {
+            "path": "backend/tests/test_ocr_final_source_links.py",
+            "line": 126,
+            "text": "def test_field_conflict_keeps_original_literals_for_inspection():"
+          },
+          {
+            "path": "backend/tests/test_ocr_final_source_links.py",
+            "line": 130,
+            "text": "conflict = next(f for f in findings if f['code'] == 'V8_FINAL_FIELD_CONFLICT')"
+          },
+          {
+            "path": "backend/tools/ocr_benchmark/refine_v8.py",
+            "line": 203,
+            "text": "if len(leaders) > 1:"
+          }
+        ],
+        "implication": "Ca kiểm thử tìm V8_FINAL_FIELD_CONFLICT/selected; nhánh ngang bằng hiện tạo V8_FINAL_FIELD_UNRESOLVED/retained và giữ baseline. Có nguy cơ kỳ vọng cũ không còn phù hợp. Chưa chạy, không ghi kết quả FAIL từ phân tích này.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R02",
+        "level": "HIGH",
+        "description": "Gate chỉ nằm ở launcher G13; launcher này ép testing/test DB/upload. Chưa có đường development tương đương được xác minh.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R03",
+        "level": "HIGH",
+        "description": "5/8 hash lệch baseline đang dùng. 37 tệp thêm chưa có baseline G13 riêng; hash hiện tại chỉ định danh source.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R04",
+        "level": "MEDIUM",
+        "description": "Snapshot chứa thay đổi chưa commit; commit 26bc332 chưa đại diện toàn bộ phiên bản. Không bắt buộc commit trong lượt này, nhưng mọi bằng chứng/phê duyệt phải dùng cùng manifest bytes.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R05",
+        "level": "HIGH",
+        "description": "Chất lượng current fallback từng không đạt trên mẫu fault G13; phục hồi V8 không bảo đảm nếu chính baseline/engine lỗi. Không có chứng minh chất lượng cho bản hiện tại.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R06",
+        "level": "MEDIUM",
+        "description": "Thiếu dấu/bảng phức tạp/nhiều trang/VAT-discount và confidence chưa hiệu chuẩn; NFR01 thiếu tập độc lập và hồ sơ A/B.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R07",
+        "level": "MEDIUM",
+        "description": "Gói Backend và Tesseract/traineddata thực tế chưa được định danh trong manifest nguồn. Thư viện dùng khoảng phiên bản, có thể đổi hành vi.",
+        "status": "OPEN"
+      },
+      {
+        "id": "R08",
+        "level": "MEDIUM",
+        "description": "evaluate.py lịch sử gắn cứng 441 bài và số liệu DEMO, tạo trực tiếp OFFLINE_GATE.json. Không dùng nó như thủ tục phát hành baseline mới chưa được phê duyệt.",
+        "status": "OPEN"
+      }
+    ],
+    "approval_from_existing_evidence_only": "INSUFFICIENT FOR GATE PASS OR DEVELOPMENT ACTIVATION",
+    "minimum_development_conditions": [
+      "Phạm vi/tiêu chí và quyết định cho phép development được duyệt.",
+      "Validator và đường startup có Gate được cho phép cho development; mọi sửa cần nằm trong snapshot sau cùng.",
+      "Bằng chứng kỹ thuật cho đúng snapshot và xử lý bất đồng R01 có lưu vết.",
+      "Baseline có quyết định phê duyệt, hash toàn phạm vi được chốt và cấu hình runtime/backup/upload/dữ liệu hợp lệ."
+    ],
+    "verification_policy": "Chỉ ghi nhận khoảng thiếu; không chạy hoặc yêu cầu người dùng kiểm thử thủ công trong lượt này.",
+    "approval_form": {
+      "responsible_reviewer": null,
+      "role": null,
+      "scope_decision": null,
+      "criteria_reference": null,
+      "evidence_decision": null,
+      "risk_disposition": null,
+      "development_permission": null,
+      "decision_timestamp": null
+    },
+    "prior_document_sha256": {
+      "dossier": "459ed94e40bee86006da60c04d956c736f83336490f30fd9496f2d0fc24cc12e",
+      "proposal": "338808037cc53eb2e87596b6c70f26f0d41e1e1cb31890f5e90c80b621c04fb2"
+    }
+  }
+}

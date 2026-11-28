@@ -1,0 +1,291 @@
+diff --git a/backend/tools/ocr_benchmark/hybrid_v8_final.py b/backend/tools/ocr_benchmark/hybrid_v8_final.py
+index d4b78f9..49c40e7 100644
+--- a/backend/tools/ocr_benchmark/hybrid_v8_final.py
++++ b/backend/tools/ocr_benchmark/hybrid_v8_final.py
+@@ -5,6 +5,7 @@ or acceptance decisions are used here. Optional failures retain observed data.
+ """
+ from copy import deepcopy
+ from math import ceil, floor, isfinite
++from statistics import median
+ from time import perf_counter
+ import unicodedata
+ 
+@@ -62,6 +63,56 @@ def _seller_readbacks(raster, candidates, page, findings):
+     return reads
+ 
+ 
++def _table_header_readback(raster, reads, page, findings):
++    """One bounded, polarity-aware read of an observed incomplete header."""
++    if raster is None:
++        return []
++    headers = [(read, header) for read in reads if (header := refine.grid.header_for(read))]
++    if not headers or any('quantity' in header.centers for _read, header in headers):
++        return []
++    read, header = max(headers, key=lambda pair: len(pair[1].centers))
++    if not {'description', 'unit', 'unit_price', 'amount'}.issubset(header.centers) or not header.indices:
++        return []
++    from PIL import ImageOps, ImageStat
++    boxes = [read.boxes[i] for i in header.indices]
++    h = median(box.word[3] - box.word[1] for box in boxes)
++    if h <= 0:
++        return []
++    left = max(0, floor(min(box.word[0] for box in boxes) - h))
++    right = min(raster.width, ceil(max(box.word[2] for box in boxes) + h))
++    top = max(0, floor(min(box.word[1] for box in boxes) - 1.5 * h))
++    bottom = min(raster.height, ceil(header.bottom + 1.5 * h))
++    if right <= left or bottom <= top or (right - left) * (bottom - top) > 2_000_000:
++        return []
++    crop = raster.crop((left, top, right, bottom)).convert('L')
++    inverted = ImageStat.Stat(crop).median[0] < 128
++    if inverted:
++        crop = ImageOps.invert(crop)
++    try:
++        observed = v5.ocr_region(crop, (0, 0, crop.width, crop.height),
++                                 'header-final-columns', 'vie+eng', 6)
++        mapped = [v5.rectangle(box.text, box.word[0] + left, box.word[1] + top,
++                               box.word[2] + left, box.word[3] + top, box.score)
++                  for box in observed.boxes]
++        result = v5.Read(observed.tag, mapped, observed.groups, raster.size,
++                         {**observed.transform, 'bbox': (left, top, right, bottom),
++                          'inverted': inverted, 'coordinate_space': 'document pixels'})
++        recovered = refine.grid.header_for(result)
++        shared = set(header.centers).intersection(recovered.centers) if recovered else set()
++        if (not recovered or 'quantity' not in recovered.centers
++                or not {'description', 'unit_price', 'amount'}.issubset(shared)
++                or any(abs(header.centers[key] - recovered.centers[key]) * raster.width > 3 * h
++                       for key in shared)):
++            findings.append({'code': 'V8_FINAL_HEADER_COLUMNS_UNRESOLVED', 'page': page,
++                             'requires_review': True})
++            return []  # An incompatible read must not drive column assignment.
++        return [result]
++    except (RuntimeError, ValueError, v5.old.pytesseract.TesseractError) as exc:
++        findings.append({'code': 'V8_FINAL_HEADER_READ_FAILED', 'page': page,
++                         'error_type': type(exc).__name__, 'requires_review': True})
++        return []
++
++
+ def _cell_readbacks(raster, rows, reads, page, findings):
+     recorded = []
+     if raster is None:
+@@ -139,6 +190,8 @@ def _refine_page(page, old, layout, raster, carried, document_number):
+     findings += warnings
+     if any(note['code'] == 'V8_FINAL_CONTINUATION_IDENTIFIER_CONFLICT' for note in warnings):
+         return old, {}, {'page': page['page'], 'status': 'v8_baseline_retained'}, findings, None, []
++    header_reads = _table_header_readback(raster, reads, page['page'], findings)
++    reads = [*reads, *header_reads]
+     candidates = refine.field_candidates(reads)
+     crop_reads = _seller_readbacks(raster, candidates, page['page'], findings)
+     for values in candidates.values():
+@@ -148,7 +201,8 @@ def _refine_page(page, old, layout, raster, carried, document_number):
+     rows, warnings = refine.recover_rows(reads, old, inherited)
+     findings += warnings
+     cell_reads = _cell_readbacks(raster, rows, reads, page['page'], findings)
+-    next_state = next_table_state(reads, rows, page['page'], document_number, inherited)
++    next_state = next_table_state(reads, rows, page['page'], document_number,
++                                  refine.table_header(reads, inherited))
+     adjustments = financial_observations(reads, page['page'])
+     for row in rows:
+         row['page'] = page['page']
+@@ -157,6 +211,7 @@ def _refine_page(page, old, layout, raster, carried, document_number):
+         row.pop('_read', None)
+     details = {'page':page['page'], 'status':'refined', 'field_candidates':candidates,
+                'inherited_columns':dict(inherited.centers) if inherited else None,
++               'header_reads':[v6.serialized(read) for read in header_reads],
+                'seller_reads':[v6.serialized(read) for read in crop_reads],
+                'cell_reads':[v6.serialized(read) for read in cell_reads]}
+     return rows, candidates, details, findings, next_state, adjustments
+diff --git a/backend/tools/ocr_benchmark/refine_v8.py b/backend/tools/ocr_benchmark/refine_v8.py
+index d14e7cd..8790eb7 100644
+--- a/backend/tools/ocr_benchmark/refine_v8.py
++++ b/backend/tools/ocr_benchmark/refine_v8.py
+@@ -10,7 +10,7 @@ from app.invoice_financials import (party_name_allowed, item_description_boundar
+ from . import pipeline_v4 as v4, pipeline_v5 as v5, table_v8 as grid
+ from .table_v3 import row_evidence, number
+ from .source_links_v8_final import (
+-    baseline_row_match, following_value, party_label, token_ids_for_span, wrapped_party_value, split_party_columns,
++    baseline_row_match, following_value, party_label, contextual_party_label, party_name_anchor, token_ids_for_span, wrapped_party_value, split_party_columns,
+ )
+ from .document_fields_v8_final import (document_label, identity, observed_value, target_observations,
+                                      inline_invoice_date_observations, monetary_observations, MONETARY_FIELDS)
+@@ -83,7 +83,8 @@ def field_candidates(reads):
+                              and observed_value(*spec) is not None)), default=boundary)
+         party_boundary = min(boundary, party_end)
+         party_columns = [(line, spec[1]) for line in lines if line.y < party_boundary
+-                         and (spec := party_label(line.text)) and spec[0] in ('buyer_name', 'seller_name')]
++                         and (spec := contextual_party_label(rd, line, lines, party_boundary))
++                         and spec[0] in ('buyer_name', 'seller_name')]
+         for observation in monetary_observations(rd):
+             value = candidate(rd, observation['line'], observation['value'], observation['ids'], 3)
+             value['observed_literal'] = observation['literal']
+@@ -93,12 +94,15 @@ def field_candidates(reads):
+             plain = v4.plain(line.text)
+             if NOTICE.search(plain):
+                 continue
+-            labelled = party_label(line.text) if line.y < party_boundary else None
++            labelled = contextual_party_label(rd, line, lines, party_boundary) if line.y < party_boundary else None
+             if labelled:
+                 key, role, tail = labelled
+                 left = min(rd.boxes[i].word[0] for i in line.ids)
+                 height = median(rd.boxes[i].word[3] - rd.boxes[i].word[1] for i in line.ids)
+                 owner = line if role else None
++                original_label = party_label(line.text)
++                if original_label and original_label[0] == 'party_name':
++                    owner = party_name_anchor(rd, line, lines, party_boundary)
+                 value_line = line
+                 ids = line.ids
+                 if tail:
+@@ -426,11 +430,32 @@ def receipt_rows(read):
+     return output
+ 
+ 
++def table_header(reads, inherited_header=None):
++    """Union explicit, aligned labels from reads of the same page, not cells."""
++    headers = [header for rd in reads if (header := grid.header_for(rd))]
++    header = max(headers, key=lambda value: len(value.centers), default=inherited_header)
++    if header is None or not reads:
++        return header
++    width = reads[0].size[0]
++    heights = [box.word[3] - box.word[1] for rd in reads for box in rd.boxes]
++    h = median(heights) if heights else 15
++    centers = dict(header.centers)
++    for observed in [*headers, *([inherited_header] if inherited_header else [])]:
++        shared = set(centers).intersection(observed.centers)
++        if (len(shared) < 2
++                or (observed is not inherited_header and abs(observed.bottom - header.bottom) > 3 * h)
++                or any(abs(centers[key] - observed.centers[key]) * width > 3 * h for key in shared)):
++            continue
++        for key, center in observed.centers.items():
++            if key not in centers and all(abs(center - existing) * width > h for existing in centers.values()):
++                centers[key] = center
++    return grid.Header(header.bottom, centers, header.indices)
++
++
+ def recover_rows(reads, fallback, inherited_header=None):
+     if not reads:
+         return deepcopy(fallback), [{'code':'V8_FINAL_NO_USABLE_PAGE_READS'}]
+-    headers = [grid.header_for(rd) for rd in reads]
+-    header = max((h for h in headers if h), key=lambda h: len(h.centers), default=inherited_header)
++    header = table_header(reads, inherited_header)
+     tables, rejected = [], []
+     for rd in reads:
+         if rd.tag.startswith(('header', 'footer', 'v7-label', 'v7-supplier')):
+diff --git a/backend/tools/ocr_benchmark/source_links_v8_final.py b/backend/tools/ocr_benchmark/source_links_v8_final.py
+index 8764703..d934c60 100644
+--- a/backend/tools/ocr_benchmark/source_links_v8_final.py
++++ b/backend/tools/ocr_benchmark/source_links_v8_final.py
+@@ -7,7 +7,7 @@ import re
+ from decimal import Decimal, InvalidOperation
+ from statistics import median
+ from unicodedata import combining, normalize
+-from app.invoice_financials import SELLER_NAME_LABEL, BUYER_NAME_LABEL
++from app.invoice_financials import SELLER_NAME_LABEL, BUYER_NAME_LABEL, party_section_role
+ 
+ 
+ def folded(value):
+@@ -44,13 +44,16 @@ def party_label(text):
+     label = folded(re.sub(r'\([^)]*\)', '', parts[0])).strip(' .;')
+     seller = SELLER_NAME_LABEL
+     buyer = BUYER_NAME_LABEL
+-    if re.fullmatch(seller, label):
++    section_role = party_section_role(parts[0])
++    if section_role:
++        field, role = section_role + '_name', section_role
++    elif re.fullmatch(seller, label):
+         field, role = 'seller_name', 'seller'
+     elif re.fullmatch(buyer, label):
+         field, role = 'buyer_name', 'buyer'
+-    elif label in ('ten don vi', 'ten cong ty', 'company name') and len(hints) == 1:
+-        role = next(iter(hints))
+-        field = role + '_name'
++    elif label in ('ten don vi', 'ten cong ty', 'company name'):
++        role = next(iter(hints)) if hints else None
++        field = role + '_name' if role else 'party_name'
+     else:
+         tax = re.fullmatch(
+             r'(?:ma so thue|mst|tax (?:code|id))(?: (?:nguoi |don vi )?(ban|mua))?'
+@@ -69,6 +72,48 @@ def party_label(text):
+     return field, role, parts[1].strip() if len(parts) == 2 else ''
+ 
+ 
++def contextual_party_label(read, line, lines, boundary):
++    """Bind an unqualified name label to its observed section and column."""
++    spec = party_label(line.text)
++    if not spec or spec[0] != 'party_name':
++        return spec
++    anchor = party_name_anchor(read, line, lines, boundary)
++    if anchor is None:
++        return None
++    role = party_label(anchor.text)[1]
++    return role + '_name', role, spec[2]
++
++
++def party_name_anchor(read, line, lines, boundary):
++    """Return the actual role-heading line used to own a generic name."""
++    h = median(read.boxes[i].word[3] - read.boxes[i].word[1] for i in line.ids)
++    left = min(read.boxes[i].word[0] for i in line.ids)
++    anchors = []
++    for other in lines:
++        if other is line or not other.y < line.y < boundary:
++            continue
++        label = party_label(other.text)
++        if not label or label[0] not in ('seller_name', 'buyer_name') or label[2]:
++            continue
++        x = min(read.boxes[i].word[0] for i in other.ids)
++        if abs(left - x) > 3 * h:
++            continue
++        # Do not carry a heading across another unlabeled party block.
++        if any(other.y < peer.y < line.y
++               and (p := party_label(peer.text)) and p[0] == 'party_name'
++               and abs(min(read.boxes[i].word[0] for i in peer.ids) - left) <= 2 * h
++               for peer in lines):
++            continue
++        anchors.append((other, label[1]))
++    if not anchors:
++        return None
++    latest = max(anchor.y for anchor, _role in anchors)
++    roles = {role for anchor, role in anchors if latest - anchor.y < h / 2}
++    if len(roles) != 1:
++        return None
++    return max(anchors, key=lambda entry: entry[0].y)[0]
++
++
+ def following_value(read, line, lines, boundary):
+     """Return one unambiguous nearby value line, not the next field or column."""
+     h = median(read.boxes[i].word[3] - read.boxes[i].word[1] for i in line.ids)
+diff --git a/backend/tools/ocr_benchmark/table_state_v8_final.py b/backend/tools/ocr_benchmark/table_state_v8_final.py
+index c4dde47..0ea3acc 100644
+--- a/backend/tools/ocr_benchmark/table_state_v8_final.py
++++ b/backend/tools/ocr_benchmark/table_state_v8_final.py
+@@ -43,6 +43,11 @@ def next_table_state(reads, rows, page_number, document_number, inherited=None):
+     headers = [grid.header_for(read) for read in reads]
+     header = max((value for value in headers if value),
+                  key=lambda value: len(value.centers), default=inherited)
++    if inherited and header and set(header.centers).issubset(inherited.centers) and all(
++            abs(header.centers[key] - inherited.centers[key]) * reads[0].size[0]
++            <= 2 * median(box.word[3] - box.word[1] for read in reads for box in read.boxes)
++            for key in header.centers):
++        header = inherited
+     if header is None or not {'description', 'amount'}.issubset(header.centers):
+         return None
+     positions = [point[1] for row in rows for part in row.get('evidence', {}).get('amount', [])
+diff --git a/backend/tools/ocr_benchmark/table_v7.py b/backend/tools/ocr_benchmark/table_v7.py
+index 078c9b0..219ecfd 100644
+--- a/backend/tools/ocr_benchmark/table_v7.py
++++ b/backend/tools/ocr_benchmark/table_v7.py
+@@ -24,7 +24,15 @@ def center(box):
+ 
+ 
+ def parse_rows(read, zone, inherited_header=None):
+-    header=header_for(read) or inherited_header
++    local = header_for(read)
++    # A caller may have recovered more explicit column labels in another
++    # read of this same table. Do not discard those labels merely because
++    # this local read also has a partial header.
++    compatible = local is None or (inherited_header is not None
++        and set(local.centers).issubset(inherited_header.centers)
++        and all(abs(local.centers[key] - inherited_header.centers[key]) * read.size[0] <= 2 * zone['h']
++                for key in local.centers))
++    header = inherited_header if inherited_header and compatible else local
+     if not header or 'amount' not in header.centers:
+         return legacy_rows(read,zone)
+     boxes=read.boxes; width=read.size[0]; h=zone['h']; rejected=[]

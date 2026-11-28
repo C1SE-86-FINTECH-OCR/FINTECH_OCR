@@ -1,0 +1,1373 @@
+diff --git a/backend/app/core.py b/backend/app/core.py
+index bff5b99..3c58ee2 100644
+--- a/backend/app/core.py
++++ b/backend/app/core.py
+@@ -1,6 +1,7 @@
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path
+ from typing import Generator
++from typing import Literal
+ import os
+ import jwt
+ from argon2 import PasswordHasher
+@@ -8,6 +9,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
+ from fastapi import Depends, HTTPException, status
+ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+ from pydantic_settings import BaseSettings, SettingsConfigDict
++from pydantic import Field, model_validator
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
+ 
+@@ -20,6 +22,15 @@ class Settings(BaseSettings):
+     max_upload_mb: int = 20
+     access_token_minutes: int = 480
+     app_env: str = 'development'
++    ocr_pipeline: Literal['current', 'hybrid_v6', 'hybrid_v7'] = 'current'
++    ocr_hybrid_fallback: bool = True
++    ocr_hybrid_max_pages: int = Field(default=12, ge=1, le=12)
++
++    @model_validator(mode='after')
++    def experimental_ocr_requires_testing(self):
++        if self.ocr_pipeline in ('hybrid_v6','hybrid_v7') and self.app_env != 'testing':
++            raise ValueError('Hybrid OCR is experimental: set APP_ENV=testing')
++        return self
+ settings=Settings()
+ if settings.app_env == 'production' and settings.jwt_secret.startswith('dev-only'):
+     raise RuntimeError('Set a secure JWT_SECRET before production')
+diff --git a/backend/app/extraction.py b/backend/app/extraction.py
+index bad1f76..7be62f9 100644
+--- a/backend/app/extraction.py
++++ b/backend/app/extraction.py
+@@ -15,6 +15,7 @@ from datetime import date, datetime
+ from difflib import SequenceMatcher
+ from decimal import Decimal, InvalidOperation
+ from pathlib import Path
++from statistics import median
+ from urllib.parse import urlparse
+ 
+ import pytesseract
+@@ -193,6 +194,414 @@ def _is_summary_or_party_line(text: str) -> bool:
+     ))
+ 
+ 
++def _is_item_table_boundary(text: str) -> bool:
++    """Recognize summary/metadata that closes an OCR item-table region."""
++    if _is_summary_or_party_line(text):
++        return True
++    plain = _plain(text)
++    return bool(re.match(
++        r"^\s*(?:ky\s+hieu|so\s+hoa\s+don|invoice\s+(?:no|number|symbol)|"
++        r"dien\s+thoai|phone|tel|so\s+tai\s+khoan|tai\s+khoan|bank\s+account|"
++        r"dia\s+chi|address|website|email|ghi\s+chu|phuong\s+thuc\s+thanh\s+toan)\b\s*[:;]",
++        plain,
++    ))
++
++
++def _is_unstructured_item_header(line: str) -> bool:
++    """Find a table header in a plain Tesseract text pass with lost cell borders."""
++    plain = _plain(line)
++    has_position = bool(re.search(r"\bstt\b|\bno\s*\.?\b", plain))
++    has_description = bool(re.search(
++        r"\b(?:ten\s+hang(?:\s+hoa)?|ten\s+san\s+pham|hang\s+hoa|"
++        r"dien\s+giai|description|item\s+name|product|goods|service)\b", plain
++    ))
++    has_amount = bool(re.search(r"\b(?:thanh\s+tien|line\s+total|amount)\b", plain))
++    return has_position and has_description and has_amount
++
++
++def _parse_unstructured_item_row(line: str, line_no: int) -> dict | None:
++    """Parse a numbered row only after a table header established its context.
++
++    Unseparated 4-digit identifiers (e.g. laptop model numbers) are not treated
++    as money. Unit/quantity are read only when a unit token visibly separates
++    them from the description; otherwise they remain unknown.
++    """
++    row = re.match(r"^\s*\d{1,3}[.)]?\s+(.+?)\s*$", line)
++    if not row:
++        return None
++    body = row.group(1).strip()
++    amount_pattern = re.compile(
++        r"(?<!\d)(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d{5,}(?:[.,]\d{1,2})?)(?!\d)"
++    )
++    amounts = list(amount_pattern.finditer(body))
++    if not amounts:
++        return None
++    amount = money(amounts[-1].group(0))
++    if amount is None:
++        return None
++
++    unit_price = money(amounts[-2].group(0)) if len(amounts) >= 2 else None
++    description_end = amounts[-2].start() if len(amounts) >= 2 else amounts[-1].start()
++    prefix = body[:description_end].rstrip()
++    unit = quantity = None
++    if len(amounts) >= 2:
++        # Units provide a reliable boundary between model/name digits and qty.
++        suffix = re.match(
++            r"(?s)^(?P<description>.+?)\s+(?P<unit>[^\W\d_][\w./-]{0,19})\s+"
++            r"(?P<quantity>\d+(?:[.,]\d+)?)\s*$",
++            prefix,
++            re.UNICODE,
++        )
++        if suffix:
++            prefix = suffix.group("description").rstrip()
++            unit = suffix.group("unit")[:30]
++            quantity = money(suffix.group("quantity"))
++
++    description = " ".join(prefix.split()).strip(" \t:;.,-")
++    if len(re.sub(r"[^a-z]", "", _plain(description))) < 3:
++        return None
++    return {
++        "line_no": line_no,
++        "description": description[:2000],
++        "unit": unit,
++        "quantity": quantity,
++        "unit_price": unit_price,
++        "amount": Decimal(str(amount)),
++    }
++
++
++def _extract_unstructured_table_items(raw_text: str) -> list[dict]:
++    """Read plain OCR rows only within an explicitly headed item table."""
++    lines = raw_text.splitlines()
++    header_index = next((i for i, line in enumerate(lines) if _is_unstructured_item_header(line)), None)
++    if header_index is None:
++        return []
++
++    row_groups = []
++    current = None
++    for line in lines[header_index + 1:]:
++        cleaned = " ".join(line.split()).strip()
++        if not cleaned:
++            continue
++        if _is_item_table_boundary(cleaned):
++            break
++        numbered = re.match(r"^\s*\d{1,3}[.)]?\s+", cleaned)
++        if numbered:
++            if current:
++                row_groups.append(current)
++            current = cleaned
++        elif current:
++            # OCR may wrap a long product name onto the next physical text row.
++            # It remains attached only while we are inside the headed table.
++            current += " " + cleaned
++    if current:
++        row_groups.append(current)
++
++    items = []
++    for row in row_groups:
++        item = _parse_unstructured_item_row(row, len(items) + 1)
++        if item:
++            items.append(item)
++    return items
++
++
++def _spatial_lines(words) -> list[list[tuple[float, float, float, float, str]]]:
++    """Cluster OCR/PDF words into visual rows using their bounding boxes."""
++    ordered = sorted(words, key=lambda word: (word[1], word[0]))
++    rows: list[list[tuple[float, float, float, float, str]]] = []
++    for word in ordered:
++        if not word[4] or not str(word[4]).strip():
++            continue
++        if rows and abs(word[1] - sum(item[1] for item in rows[-1]) / len(rows[-1])) <= max(2.5, (word[3] - word[1]) * 0.32):
++            rows[-1].append(word)
++        else:
++            rows.append([word])
++    return [sorted(row, key=lambda word: word[0]) for row in rows]
++
++
++def _spatial_header_center(row, patterns: tuple[str, ...]) -> float | None:
++    ordered = sorted(row, key=lambda word: word[0])
++    matches = []
++    for start in range(len(ordered)):
++        for width in range(1, min(7, len(ordered) - start) + 1):
++            window = ordered[start:start + width]
++            phrase = " ".join(_plain(str(word[4])) for word in window)
++            if any(re.search(pattern, phrase) for pattern in patterns):
++                matches.append((width, start, window))
++    if not matches:
++        return None
++    # The shortest matching span avoids absorbing preceding labels such as
++    # "STT" when locating the adjacent "Tên hàng" column.
++    _width, _start, match_words = min(matches, key=lambda entry: (entry[0], entry[1]))
++    return (min(word[0] for word in match_words) + max(word[2] for word in match_words)) / 2
++
++
++def _spatial_money(cell: str) -> float | None:
++    """Read a whole table cell, rejecting formulas and OCR-split digit groups."""
++    value = " ".join((cell or "").split()).strip()
++    if re.fullmatch(r"(?:\d{1,3}(?:[.,]\d{3})+|\d{4,}|0)(?:[.,]\d{1,2})?", value):
++        return money(value)
++    return None
++
++
++def _spatial_quantity(cell: str) -> float | None:
++    value = " ".join((cell or "").split()).strip()
++    if re.fullmatch(r"\d{1,8}(?:[.,]\d{1,4})?", value):
++        return money(value)
++    return None
++
++
++def _extract_spatial_table_items(words) -> list[dict]:
++    """Read a headed table from PDF text or Tesseract word-box coordinates."""
++    rows = _spatial_lines(words)
++    header = None
++    for index, row in enumerate(rows):
++        joined = _plain(" ".join(str(word[4]) for word in row))
++        if not (re.search(r"\b(?:stt|no)\b", joined)
++                and re.search(r"\b(?:ten\s+hang|description|goods|product)\b", joined)
++                and re.search(r"\b(?:thanh\s+tien|amount|line\s+total)\b", joined)):
++            continue
++        centers = {
++            "row": _spatial_header_center(row, (r"\bstt\b", r"\bno\b")),
++            "description": _spatial_header_center(row, (r"ten\s+hang", r"description", r"goods", r"product")),
++            "unit": _spatial_header_center(row, (r"don\s+vi\s+tinh", r"\bdvt\b", r"\bunit\b")),
++            "quantity": _spatial_header_center(row, (r"so\s+luong", r"\bquantity\b", r"\bqty\b", r"\bsl\b")),
++            "unit_price": _spatial_header_center(row, (r"don\s+gia", r"unit\s+price", r"\bprice\b")),
++            "amount": _spatial_header_center(row, (r"thanh\s+tien", r"line\s+total", r"\bamount\b")),
++        }
++        if centers["row"] is not None and centers["description"] is not None and centers["amount"] is not None:
++            header = (index, centers)
++            break
++    if header is None:
++        return []
++
++    header_index, centers = header
++    output = []
++    pending = None
++
++    def cell_text(row, kind):
++        center = centers.get(kind)
++        if center is None:
++            return ""
++        if kind == "row":
++            limit = centers["description"] - 4
++            selected = [w for w in row if w[2] <= limit and abs((w[0] + w[2]) / 2 - center) <= 18]
++        elif kind == "description":
++            start_limit = centers["row"] + 5
++            end_limit = (center + centers["unit"]) / 2 if centers.get("unit") is not None else (center + centers["amount"]) / 2
++            selected = [w for w in row if (w[0] + w[2]) / 2 >= start_limit and (w[0] + w[2]) / 2 < end_limit]
++        else:
++            previous = [v for v in centers.values() if v is not None and v < center]
++            following = [v for v in centers.values() if v is not None and v > center]
++            left = (max(previous) + center) / 2 if previous else float("-inf")
++            right = (min(following) + center) / 2 if following else float("inf")
++            selected = [w for w in row if left <= (w[0] + w[2]) / 2 < right]
++        return " ".join(str(word[4]) for word in selected).strip()
++
++    def flush():
++        nonlocal pending
++        if pending and pending["description"].strip() and pending["amount"] is not None:
++            output.append({
++                "line_no": len(output) + 1,
++                "description": " ".join(pending["description"].split())[:2000],
++                "unit": pending["unit"] or None,
++                "quantity": pending["quantity"],
++                "unit_price": pending["unit_price"],
++                "amount": Decimal(str(pending["amount"])),
++            })
++        pending = None
++
++    for row in rows[header_index + 1:]:
++        line = " ".join(str(word[4]) for word in row)
++        if _is_summary_or_party_line(line):
++            flush()
++            break
++        row_number = cell_text(row, "row")
++        if re.fullmatch(r"\d{1,3}", row_number.strip()):
++            flush()
++            pending = {
++                "description": cell_text(row, "description"),
++                "unit": cell_text(row, "unit"),
++                "quantity": _spatial_quantity(cell_text(row, "quantity")),
++                "unit_price": _spatial_money(cell_text(row, "unit_price")),
++                "amount": _spatial_money(cell_text(row, "amount")),
++            }
++        elif pending:
++            continuation = cell_text(row, "description")
++            if continuation:
++                pending["description"] = (pending["description"] + " " + continuation).strip()
++            for kind in ("unit", "quantity", "unit_price", "amount"):
++                if pending[kind] in (None, ""):
++                    value = cell_text(row, kind)
++                    if kind == "unit":
++                        pending[kind] = value
++                    elif value:
++                        pending[kind] = _spatial_quantity(value) if kind == "quantity" else _spatial_money(value)
++    flush()
++    return output
++
++
++def _extract_staggered_table_items(words, header_words=()) -> list[dict]:
++    """Recover staggered headers and lines with an unreadable ordinal column."""
++    if not words:
++        return []
++    labels = {
++        "description": (r"\b(?:ten\s+hang|dien\s+giai|description|item\s+name|product|goods)\b",),
++        "unit": (r"\b(?:don\s+vi\s+tinh|dvt|unit)\b",),
++        "quantity": (r"\b(?:so\s*luong|quantity|qty|sl)\b",),
++        "unit_price": (r"\b(?:don\s+gia|unit\s+price|price)\b",),
++        "amount": (r"\b(?:thanh\s+tien|line\s+total|amount)\b",),
++    }
++    height = max(1, median(w[3] - w[1] for w in words))
++    ordered = sorted(words, key=lambda w: w[1])
++    for index, word in enumerate(ordered):
++        if not re.search(r"\b(?:ten|dien|description|item|product|goods)\b", _plain(word[4])):
++            continue
++        # Use a bounded band because centered labels and currency captions
++        # often sit on different visual baselines in the same table header.
++        top = word[1] - 1.6 * height
++        bottom = word[1] + 1.4 * height
++        band = [
++            w for w in ordered[max(0, index - 80):index + 80]
++            if top <= w[1] <= bottom and re.search(r"[a-z]", _plain(w[4]))
++            and _plain(w[4]).strip(" ()[]") not in {"vnd", "vnđ", "usd"}
++        ]
++        centers = {kind: _spatial_header_center(band, patterns) for kind, patterns in labels.items()}
++        desc, qty, price, amount = (centers[k] for k in ("description", "quantity", "unit_price", "amount"))
++        if None not in (desc, qty, price, amount) and desc < qty < price < amount:
++            break
++    else:
++        return []
++
++    unit = centers["unit"]
++    if unit is None:
++        # OCR layouts disagree on short labels such as "ĐVT". For the same
++        # prepared image, reuse a label from the other pass in this header band.
++        unit = _spatial_header_center([w for w in header_words if top <= w[1] <= bottom], labels["unit"])
++    if unit is None or not desc < unit < qty:
++        unit = None
++    desc_right = desc + 0.75 * ((unit if unit is not None else qty) - desc)
++    qty_left = (unit + qty) / 2 if unit is not None else desc_right
++    price_left, amount_left = (qty + price) / 2, (price + amount) / 2
++    ordinal = _spatial_header_center(band, (r"\b(?:stt|no)\b",))
++    desc_left = ordinal + (desc - ordinal) * 0.18 if ordinal is not None and ordinal < desc else 0
++
++    def xmid(w):
++        return (w[0] + w[2]) / 2
++
++    def ymid(w):
++        return (w[1] + w[3]) / 2
++
++    def description(words):
++        return " ".join(w[4] for w in sorted(words, key=lambda w: w[0]) if re.search(r"\w", w[4]))
++
++    body = [w for w in ordered if w[1] > bottom]
++    # A subtotal can be split across baselines. Detect the label across rows
++    # and before analyzing amounts, so summary cells cannot become products.
++    rows = _spatial_lines(body)
++    for index, row in enumerate(rows):
++        row_text = " ".join(w[4] for w in row)
++        following = rows[index + 1] if index + 1 < len(rows) else []
++        if following and following[0][1] - row[0][1] <= 1.3 * height:
++            near_text = row_text + " " + " ".join(w[4] for w in following)
++        else:
++            near_text = row_text
++        if (_is_item_table_boundary(row_text) or _is_summary_or_party_line(near_text)
++                or re.search(r"\b(?:tien\s+hang|tong\s+thanh\s+toan|sub\s*total)\b", _plain(row_text))):
++            body = [w for w in body if w[1] < row[0][1]]
++            break
++
++    result = []
++    last_row_y = bottom
++    anchors = [w for w in body if xmid(w) >= amount_left and _spatial_money(w[4]) is not None]
++    for anchor in anchors:
++        y = ymid(anchor)
++        if y - last_row_y < height * 0.75:
++            continue
++        row = [w for w in body if abs(ymid(w) - y) <= 0.76 * height]
++        price_words = [w for w in row if price_left <= xmid(w) < amount_left and _spatial_money(w[4]) is not None]
++        qty_words = [w for w in row if qty_left <= xmid(w) < price_left and _spatial_quantity(w[4]) is not None]
++        if len(price_words) > 1 or len(qty_words) > 1 or not (price_words or qty_words):
++            continue
++        name_words = [w for w in row if desc_left <= xmid(w) < desc_right]
++        name = description(name_words)
++        if len(re.sub(r"[^a-z]", "", _plain(name))) < 3 or _is_item_table_boundary(name):
++            continue
++        unit_text = description([w for w in row if desc_right <= xmid(w) < qty_left])
++        # Keep adjacent wrapped name text, stopping before the next amount
++        # row. A specifications-only line is retained in raw OCR evidence.
++        next_y = min((ymid(w) for w in anchors if ymid(w) > y + height), default=y + 4 * height)
++        for continuation in _spatial_lines([
++            w for w in body if desc_left <= xmid(w) < desc_right
++            and y + 0.76 * height < ymid(w) < min(next_y - height, y + 2.4 * height)
++        ]):
++            tail = description(continuation)
++            if tail and not re.match(r"^\S*\d\S*(?:/\S+){2,}", tail) and not _is_item_table_boundary(tail):
++                name += " " + tail
++        result.append({
++            "line_no": len(result) + 1,
++            "description": name[:2000],
++            "unit": unit_text[:30] or None,
++            "quantity": _spatial_quantity(qty_words[0][4]) if qty_words else None,
++            "unit_price": _spatial_money(price_words[0][4]) if price_words else None,
++            "amount": Decimal(str(_spatial_money(anchor[4]))),
++        })
++        last_row_y = y
++    return result
++
++
++def _image_spatial_items(image) -> list[dict]:
++    boxes = _tesseract_word_boxes(image)
++    return (_extract_spatial_table_items(boxes)
++            or _extract_staggered_table_items(_tesseract_word_boxes(image, psm=11), boxes))
++
++
++def _extract_spatial_items_from_file(data: bytes, extension: str) -> list[dict]:
++    """Use embedded PDF word boxes or a local Tesseract layout pass as fallback."""
++    try:
++        if extension == "pdf":
++            import fitz
++            from PIL import Image
++            document = fitz.open(stream=data, filetype="pdf")
++            for page in document[:10]:
++                words = [tuple(word[:5]) for word in page.get_text("words", sort=True)]
++                if words:
++                    items = _extract_spatial_table_items(words) or _extract_staggered_table_items(words)
++                    if items:
++                        document.close()
++                        return items
++                    # Searchable page text already has usable geometry; do not
++                    # spend another OCR pass when that table wasn't explicit.
++                    continue
++                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
++                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
++                items = _image_spatial_items(image)
++                if items:
++                    document.close()
++                    return items
++            document.close()
++            return []
++        if extension in ("jpg", "jpeg", "png"):
++            from PIL import Image
++            with Image.open(io.BytesIO(data)) as source:
++                return _image_spatial_items(_prepare_image(source))
++    except (ImportError, ValueError, RuntimeError, OSError, pytesseract.TesseractError):
++        return []
++    return []
++
++
++def _tesseract_word_boxes(image, psm=6) -> list[tuple[float, float, float, float, str]]:
++    data = pytesseract.image_to_data(
++        image, lang="vie+eng", config=f"--psm {psm}", output_type=pytesseract.Output.DICT, timeout=35
++    )
++    return [
++        (float(data["left"][i]), float(data["top"][i]),
++         float(data["left"][i] + data["width"][i]),
++         float(data["top"][i] + data["height"][i]), str(data["text"][i]))
++        for i in range(len(data.get("text", []))) if str(data["text"][i]).strip()
++    ]
++
++
+ def _ocr_numeric_cell(value: str | None) -> float | None:
+     if value is None or not value.strip():
+         return None
+@@ -262,6 +671,102 @@ def _extract_ocr_line_items(raw_text: str | None) -> list[dict]:
+             "unit_price": unit_price,
+             "amount": Decimal(str(amount)),
+         })
++    if result:
++        return result
++
++    # Tesseract's plain-text page layout drops table borders. Use row numbers
++    # only after a product-table header and stop at the first financial or
++    # metadata section; never run the broad receipt fallback on VAT invoices.
++    table_items = _extract_unstructured_table_items(raw_text)
++    if table_items:
++        return table_items
++
++    plain = _plain(raw_text)
++    explicit_receipt = bool(re.search(
++        r"\b(?:pos\s+receipt|cash\s+receipt|retail\s+bill|hoa\s+don\s+ban\s+le|"
++        r"receipt\s+(?:no|number)|bill\s+(?:no|number))\b",
++        plain,
++    ))
++    tax_invoice = bool(re.search(
++        r"\b(?:hoa\s+don\s+gia\s+tri\s+gia\s+tang|hoa\s+don\s+dien\s+tu|"
++        r"vat\s+invoice|tax\s+invoice)\b",
++        plain,
++    ))
++    return _extract_receipt_line_items(raw_text) if explicit_receipt and not tax_invoice else []
++
++
++def _extract_receipt_line_items(raw_text: str) -> list[dict]:
++    """Read conservative thermal-receipt rows with an explicit trailing amount.
++
++    Receipt OCR commonly loses table borders and produces no tabs or pipes.
++    This fallback accepts a final VND-like amount only when the remaining text
++    looks like a product description. Quantity and unit price remain null
++    unless the receipt explicitly shows ``N x name unit-price line-total``.
++    """
++    amount_pattern = re.compile(
++        r"(?<![\d.,])(?:\d{1,3}(?:[.,]\d{3}){1,4}|\d{1,12})(?!\d)"
++    )
++    excluded = re.compile(
++        r"\b(?:subtotal|grand total|total amount|amount due|total|tong|cong tien|"
++        r"thue|vat|tax|payment|cash|change|discount|giam gia|phu phi|"
++        r"receipt|invoice|hoa don|bill|pos|cashier|date|ngay|time|gio|"
++        r"address|dia chi|phone|tel|mst|ma so thue|thank you|cam on|"
++        r"invoice number|bill number|receipt number|transaction id|"
++        r"lookup|tra cuu|reference|powered by|website|email|hotline|"
++        r"amount received|tendered|tien khach dua|tien thua|"
++        r"table|ban so|order no|cashier no|customer copy)\b"
++    )
++    result = []
++    for source_line in raw_text.splitlines():
++        line = " ".join(source_line.split()).strip()
++        if not line or "|" in line or "\t" in source_line:
++            continue
++        plain = _plain(line)
++        if excluded.search(plain) or _is_summary_or_party_line(line):
++            continue
++
++        matches = list(amount_pattern.finditer(line))
++        if not matches:
++            continue
++        last = matches[-1]
++        amount = money(last.group(0))
++        if amount is None:
++            continue
++        description = line[:last.start()].strip(" \t:;.-")
++        quantity = unit_price = None
++
++        # Read quantity/price only when all three parts are explicitly printed.
++        if len(matches) >= 2:
++            item_prefix = line[:matches[-2].start()].strip()
++            quantity_before_name = re.match(
++                r"^\s*(\d+(?:[.,]\d+)?)\s*[x×]\s*(.+?)\s*$", item_prefix, re.I
++            )
++            quantity_after_name = re.match(
++                r"^\s*(.+?)\s+(\d+(?:[.,]\d+)?)\s*[x×]\s*$", item_prefix, re.I
++            )
++            quantity_match = quantity_before_name or quantity_after_name
++            if quantity_match:
++                if quantity_before_name:
++                    quantity = money(quantity_match.group(1))
++                    description = quantity_match.group(2).strip(" \t:;.-")
++                else:
++                    quantity = money(quantity_match.group(2))
++                    description = quantity_match.group(1).strip(" \t:;.-")
++                unit_price = money(matches[-2].group(0))
++
++        if len(re.sub(r"[^a-z]", "", _plain(description))) < 3:
++            continue
++        # Date-like strings and phone numbers are not product rows.
++        if re.search(r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b", description):
++            continue
++        result.append({
++            "line_no": len(result) + 1,
++            "description": description[:2000],
++            "unit": None,
++            "quantity": quantity,
++            "unit_price": unit_price,
++            "amount": Decimal(str(amount)),
++        })
+     return result
+ 
+ 
+@@ -270,20 +775,27 @@ def _ocr_item_table_fragment(raw_text: str) -> str:
+     lines = raw_text.splitlines()
+     for index, line in enumerate(lines):
+         cells = _ocr_table_cells(line)
+-        if not cells or not _line_item_header(cells):
++        if not ((cells and _line_item_header(cells)) or _is_unstructured_item_header(line)):
+             continue
+         fragment = [line]
++        in_item_rows = False
+         for candidate in lines[index + 1:]:
+             if not candidate.strip():
+                 continue
++            if _is_item_table_boundary(candidate):
++                break
+             row_cells = _ocr_table_cells(candidate)
+-            if row_cells and re.fullmatch(r"\s*\d{1,3}[.)]?\s*", row_cells[0]):
++            numbered = bool(
++                row_cells and re.fullmatch(r"\s*\d{1,3}[.)]?\s*", row_cells[0])
++            ) or bool(re.match(r"^\s*\d{1,3}[.)]?\s+\S", candidate))
++            if numbered:
++                in_item_rows = True
+                 fragment.append(candidate)
+                 continue
+-            if _is_summary_or_party_line(candidate):
+-                break
+-            # A wrapped continuation cannot be mapped to table columns safely.
+-            break
++            if in_item_rows:
++                # Keep wrapped product names and OCR-separated numeric columns
++                # only after a numbered row and before the table's summary.
++                fragment.append(candidate)
+         return "\n".join(fragment)
+     return ""
+ 
+@@ -297,6 +809,13 @@ def extract_line_items(data: bytes, ext: str, raw_text: str | None = None) -> li
+     """
+     extension = ext.lower().lstrip(".")
+     if extension in ("jpg", "jpeg", "png", "pdf"):
++        if extension != "pdf":
++            text_items = _extract_ocr_line_items(raw_text)
++            if text_items:
++                return text_items
++        spatial_items = _extract_spatial_items_from_file(data, extension)
++        if spatial_items:
++            return spatial_items
+         return _extract_ocr_line_items(raw_text)
+     if extension != "xml":
+         return []
+@@ -335,6 +854,53 @@ def extract_line_items(data: bytes, ext: str, raw_text: str | None = None) -> li
+     return result
+ 
+ 
++def _projection_score(image) -> float:
++    """Score horizontal text-line alignment for conservative deskewing."""
++    from PIL import ImageOps
++
++    gray = ImageOps.autocontrast(image.convert("L"), cutoff=1)
++    binary = gray.point(lambda value: 0 if value < 170 else 255)
++    row_ink = [binary.crop((0, y, binary.width, y + 1)).histogram()[0] for y in range(binary.height)]
++    if not row_ink:
++        return 0.0
++    mean = sum(row_ink) / len(row_ink)
++    # Ignore nearly blank or near-solid images where alignment is not measurable.
++    if mean < binary.width * 0.002 or mean > binary.width * 0.65:
++        return 0.0
++    return sum((count - mean) ** 2 for count in row_ink) / max(mean, 1.0)
++
++
++def _deskew_small_angle(image):
++    """Correct only a measurable, small text skew; leave ambiguous images alone.
++
++    The estimate uses horizontal ink projections on a small grayscale proxy,
++    avoiding an additional OCR engine or runtime dependency. It is deliberately
++    limited to +/-5 degrees so page orientation remains the OSD pass's job.
++    """
++    from PIL import Image
++
++    proxy = image.convert("L")
++    proxy.thumbnail((700, 700), Image.Resampling.LANCZOS)
++    baseline = _projection_score(proxy)
++    if baseline <= 0:
++        return image
++    candidates = []
++    for tenth_degrees in range(-50, 51, 5):
++        if tenth_degrees == 0:
++            continue
++        angle = tenth_degrees / 10
++        rotated = proxy.rotate(angle, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=255)
++        candidates.append((_projection_score(rotated), angle))
++    if not candidates:
++        return image
++    best_score, best_angle = max(candidates)
++    # Require a clear improvement and non-trivial measured skew to avoid adding
++    # artifacts to already aligned photos, tables, or decorative backgrounds.
++    if best_score < baseline * 1.06:
++        return image
++    return image.rotate(best_angle, resample=Image.Resampling.BICUBIC, expand=False, fillcolor="white")
++
++
+ def _prepare_image(image):
+     from PIL import Image, ImageOps
+     image = ImageOps.exif_transpose(image).convert("RGB")
+@@ -350,7 +916,11 @@ def _prepare_image(image):
+             (round(image.width * scale), round(image.height * scale)),
+             Image.Resampling.LANCZOS,
+         )
+-    return image
++    # Normalize low-contrast photos/scans before estimating skew. Keep a neutral
++    # grayscale image: color is not required by Tesseract for these fields.
++    gray = ImageOps.autocontrast(image.convert("L"), cutoff=1)
++    gray = _deskew_small_angle(gray)
++    return gray.convert("RGB")
+ 
+ 
+ def _amount_from_total_row_ocr(fragment: str) -> int | None:
+@@ -587,20 +1157,48 @@ def _ocr_image(image) -> str:
+     except pytesseract.TesseractNotFoundError as exc:
+         raise RuntimeError("Tesseract OCR engine is unavailable") from exc
+     # Use a second page-layout pass only if the first pass did not identify core fields.
+-    extracted = extract_fields(text, "png")
+-    core_count = sum(bool(extracted.get(k)) for k in (
+-        "invoice_number", "invoice_date", "seller_name", "seller_tax_code"
+-    ))
++    def core_field_count(raw_text):
++        fields = extract_fields(raw_text, "png")
++        keys = ["invoice_number", "invoice_date", "seller_name"]
++        if fields["document_type"] != "bill":
++            keys.append("seller_tax_code")
++        return sum(bool(fields.get(key)) for key in keys)
++
++    core_count = core_field_count(text)
+     if core_count < 3:
+         alternative = pytesseract.image_to_string(image, lang="vie+eng", config="--psm 6", timeout=35)
+-        other = extract_fields(alternative, "png")
+-        other_count = sum(bool(other.get(k)) for k in (
+-            "invoice_number", "invoice_date", "seller_name", "seller_tax_code"
+-        ))
++        other_count = core_field_count(alternative)
+         if other_count > core_count:
+             text = alternative
+         elif other_count == core_count and len(alternative.strip()) > len(text.strip()) * 1.3:
+             text = alternative
++            core_count = other_count
++        if other_count > core_count:
++            core_count = other_count
++
++    # Tesseract's orientation pass is relatively expensive, so run it only
++    # when both standard page layouts failed to recover enough identifying data.
++    if core_count < 3:
++        try:
++            osd = pytesseract.image_to_osd(
++                image, lang="osd", output_type=pytesseract.Output.DICT, timeout=10
++            )
++            rotation = int(osd.get("rotate", 0)) % 360
++            orientation_conf = float(osd.get("orientation_conf", 0) or 0)
++        except (pytesseract.TesseractError, RuntimeError, ValueError, TypeError):
++            rotation = 0
++            orientation_conf = 0
++        if rotation in (90, 180, 270) and orientation_conf >= 1:
++            rotated = image.rotate(-rotation, expand=True)
++            corrected = pytesseract.image_to_string(
++                rotated, lang="vie+eng", config="--psm 11", timeout=35
++            )
++            corrected_count = core_field_count(corrected)
++            if corrected_count > core_count or (
++                corrected_count == core_count
++                and len(corrected.strip()) > len(text.strip()) * 1.3
++            ):
++                image, text, core_count = rotated, corrected, corrected_count
+     # In many Vietnamese invoice templates the issued date sits above the
+     # seller block; cropping that header reduces interference from the table.
+     if extract_fields(text, "png")["invoice_date"] is None and image.height >= 500:
+@@ -646,8 +1244,11 @@ def _ocr_image(image) -> str:
+     has_item_header = any(
+         (cells := _ocr_table_cells(line)) and _line_item_header(cells)
+         for line in text.splitlines()
+-    )
+-    if has_item_header and not _extract_ocr_line_items(text):
++    ) or any(_is_unstructured_item_header(line) for line in text.splitlines())
++    # Sparse PSM 11 frequently loses the complete table header. Retry the
++    # page for any likely tax invoice with no safe rows; the secondary pass is
++    # still accepted only when it contains an explicit table header and row.
++    if (has_item_header or classify("png", text) == "einvoice") and not _extract_ocr_line_items(text):
+         try:
+             table_pass = pytesseract.image_to_string(
+                 image, lang="vie+eng", config="--psm 6", timeout=35
+@@ -657,7 +1258,46 @@ def _ocr_image(image) -> str:
+         fragment = _ocr_item_table_fragment(table_pass) if table_pass else ""
+         if fragment and _extract_ocr_line_items(fragment):
+             text += "\n" + fragment
+-    return text[:60000]
++    return _reread_vietnamese_seller(image, text)[:60000]
++
++
++def _reread_vietnamese_seller(image, text: str) -> str:
++    """Recover accents from the seller's printed line, without guessing letters."""
++    from PIL import ImageOps
++
++    seller, tax = _seller_and_tax(_lines(text))
++    if not seller or not tax or not seller.isascii() or not re.match(
++        r"^(?:cong ty|doanh nghiep|ho kinh doanh|chi nhanh)\b", _plain(seller)
++    ):
++        return text
++    expected = _plain(seller)
++    try:
++        boxes = _tesseract_word_boxes(image.crop((0, 0, image.width, image.height // 2)), psm=11)
++        # Use the original upper half for coordinates. Split off neighboring
++        # metadata on the same baseline by matching the exact words of the name.
++        count = len(expected.split())
++        for row in _spatial_lines(boxes):
++            for start in range(len(row) - count + 1):
++                name = row[start:start + count]
++                if _plain(" ".join(w[4] for w in name)) != expected:
++                    continue
++                height = median(w[3] - w[1] for w in name)
++                pad = max(2, int(height * 0.35))
++                crop = image.crop((
++                    max(0, int(min(w[0] for w in name)) - pad),
++                    max(0, int(min(w[1] for w in name)) - pad),
++                    min(image.width, int(max(w[2] for w in name)) + pad),
++                    min(image.height, int(max(w[3] for w in name)) + pad),
++                ))
++                reread = pytesseract.image_to_string(
++                    ImageOps.expand(crop, border=pad, fill="white"),
++                    lang="vie+eng", config="--psm 7", timeout=10,
++                ).strip()
++                if _plain(reread) == expected:
++                    return text.replace(seller, reread, 1)
++    except (pytesseract.TesseractError, OSError, RuntimeError):
++        pass
++    return text
+ 
+ 
+ def text_from_file(data: bytes, ext: str) -> tuple[str, str]:
+@@ -671,16 +1311,22 @@ def text_from_file(data: bytes, ext: str) -> tuple[str, str]:
+         import fitz
+         from PIL import Image
+         with fitz.open(stream=data, filetype="pdf") as pdf:
+-            pages = list(pdf)[:12]
+-            text = "\n".join(page.get_text() for page in pages)
+-            if len(text.strip()) > 40:
+-                return text[:60000], "pdf-text"
+-            ocr_pages = []
+-            for page in pages[:3]:
++            # Inspect each page independently: a mixed PDF can contain both
++            # searchable text and scanned pages. A document-wide text check
++            # used to skip OCR for image-only pages, and scanning only the
++            # first three pages silently missed later invoice line items.
++            page_texts = []
++            used_ocr = False
++            for page in list(pdf)[:12]:
++                embedded = page.get_text() or ""
++                if len(embedded.strip()) > 40:
++                    page_texts.append(embedded)
++                    continue
+                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                 img = Image.open(io.BytesIO(pix.tobytes("png")))
+-                ocr_pages.append(_ocr_image(img))
+-            return "\n".join(ocr_pages)[:60000], "pdf-ocr"
++                page_texts.append(_ocr_image(img))
++                used_ocr = True
++            return "\n".join(page_texts)[:60000], "pdf-ocr" if used_ocr else "pdf-text"
+     if ext in ("jpg", "png"):
+         from PIL import Image
+         with Image.open(io.BytesIO(data)) as image:
+@@ -694,10 +1340,36 @@ def classify(ext: str, text: str) -> str:
+     if extension == "xml":
+         return "einvoice" if "cau truc hoa don dien tu xml" in low else "unknown"
+     if any(x in low for x in (
+-        "hoa don gia tri gia tang", "hoa don dien tu", "vat invoice"
++        "hoa don gia tri gia tang", "hoa don dien tu", "vat invoice", "tax invoice"
+     )):
+         return "einvoice"
+-    if any(x in low for x in ("hoa don ban le", "bill", "receipt", "phieu thu")):
++    if re.search(
++        r"\b(?:hoa don ban le|phieu thu|phieu thanh toan|receipt|cash receipt|"
++        r"retail bill|bill|receipt no|receipt number|pos receipt)\b",
++        low,
++    ) or re.search(r"\bpos\b", low):
++        return "bill"
++    # Some e-invoices lose the prominent title in OCR. Classify only when an
++    # explicit tax identifier, invoice number, issue date, and tax evidence
++    # independently support an electronic/tax invoice; a file extension or a
++    # lone tax code is never sufficient.
++    lines = _lines(text)
++    has_tax_identifier = bool(re.search(
++        r"\b(?:ma\s+so\s+thue|mst|tax\s*code)\s*[:;]?\s*\d{10}(?:-?\d{3})?\b", low
++    ))
++    has_invoice_number = _invoice_number(lines) is not None
++    has_issue_date = _get_date(lines) is not None
++    has_tax_evidence = bool(re.search(
++        r"\b(?:thue\s+(?:gtgt|vat)|vat\s+(?:amount|rate)|tax\s+invoice|invoice\s+symbol)\b", low
++    ))
++    if has_tax_identifier and has_invoice_number and has_issue_date and has_tax_evidence:
++        return "einvoice"
++    # Borderless thermal receipts often omit a type heading. Require multiple
++    # independent receipt signals, including an explicit total and item rows.
++    has_total = bool(re.search(r"\b(?:tong cong|tong tien|total|amount due)\b", low))
++    has_payment = bool(re.search(r"\b(?:cash|tien mat|payment|thanh toan|change|tien thua)\b", low))
++    has_items = bool(_extract_ocr_line_items(text))
++    if has_total and has_payment and has_items:
+         return "bill"
+     return "unknown"
+ 
+@@ -740,7 +1412,7 @@ def _invoice_number(lines) -> str | None:
+     for original, plain in lines[:20]:
+         # Explicit invoice numbers take precedence over "Mẫu số"/"Ký hiệu".
+         for pattern in (
+-            r"(?:^|\s)(?:so\s+hoa\s+don|so\s+hdon|invoice\s*(?:no\.?|number))\s*[:;.#]?\s*([a-z0-9/-]{4,32})\b",
++            r"(?:^|\s)(?:so\s+hoa\s+don|so\s+hdon|so\s+bill|bill\s*(?:no\.?|number)|receipt\s*(?:no\.?|number)|transaction\s*(?:id|no\.?)|invoice\s*(?:no\.?|number))\s*[:;.#]?\s*([a-z0-9/-]{4,32})\b",
+             r"(?:^|\s)so\s*[:;.]\s*([0-9oOilI]{4,16})\b",
+         ):
+             m = re.search(pattern, plain)
+@@ -759,44 +1431,143 @@ def _seller_and_tax(lines) -> tuple[str | None, str | None]:
+     seller_index = None
+     buyer_index = len(lines)
+     for idx, (original, plain) in enumerate(lines[:40]):
+-        if re.search(r"\b(?:nguoi mua|don vi mua|ten don vi|buyer)\b", plain):
++        if re.search(r"\b(?:nguoi mua(?: hang)?|don vi mua(?: hang)?|ten don vi|buyer)\b", plain):
+             buyer_index = idx
+             break
+-    for idx, (original, plain) in enumerate(lines[:buyer_index]):
+-        m = re.search(r"\b(?:don|ben|d[a-z]{2,4})\s+vi\s+ban\s+hang\s*[:;]?\s*(.{4,120})$", plain)
+-        if m:
++    # Role labels also occur at the bottom of e-invoices. Stop looking for
++    # explicit seller names at the first payment summary or signature block.
++    seller_end = next((idx for idx, (_, plain) in enumerate(lines) if re.match(
++        r"^[\s|(]*(?:cong\s+tien\s+hang|tong\s+(?:tien|cong|thanh\s+toan)|"
++        r"subtotal|grand\s+total|total\s+(?:amount|payment)|so\s+tien\s+bang\s+chu|"
++        r"(?:da\s+)?ky\s+dien\s+tu|chu\s+ky(?:\s+so)?)\b", plain
++    )), len(lines))
++
++    def role_or_metadata(value: str) -> bool:
++        plain = _plain(value).strip(" :;.,()")
++        return bool(
++            not plain
++            or re.fullmatch(
++                r"(?:nguoi mua(?: hang)?|nguoi ban(?: hang)?|seller|buyer|supplier|"
++                r"ky(?:,?\s*ghi ro ho ten)?|ghi ro ho ten|signature|customer|"
++                r"giam doc|ke toan truong|dai dien|thu truong don vi|director)",
++                plain,
++            )
++            or re.search(
++                r"\b(?:ky\s*,?\s*ghi\s+ro\s+ho\s+ten|ghi\s+ro\s+ho\s+ten|"
++                r"ky\s+(?:dien\s+tu|so)|chu\s+ky|digitally\s+signed|signed\s+by)\b",
++                plain,
++            )
++            or re.match(
++                r"^\s*(?:subtotal|grand\s+total|total|tong|cong\s+tien|thue|vat|"
++                r"payment|cash|change|discount|receipt|invoice|bill|pos|date|ngay|time|"
++                r"so\s+hoa\s+don|invoice\s+(?:no|number|symbol)|ky\s+hieu|"
++                r"dien\s+thoai|phone|tel|tai\s+khoan|bank\s+account|dia\s+chi|address|"
++                r"hoa\s+don|ma\s+so\s+thue|mst)\b",
++                plain,
++            )
++        )
++
++    for idx, (original, plain) in enumerate(lines[:min(80, seller_end)]):
++        m = re.search(
++            r"\b(?:(?:don|ben|ban|d[a-z]{2,4})\s+vi\s+ban\s+hang|nguoi\s+ban\s+hang|seller|supplier)"
++            r"\s*[:;]?\s*(.{4,120})$",
++            plain,
++        )
++        if m and not role_or_metadata(m[1]):
+             # Take original string after matching label length, preserving accents.
+-            tail = original[len(original) - len(m[1]):].strip(" :;.,")
++            tail = original[len(original) - len(m[1]):].strip(" :;.,\u00a0")
+             if re.search(r"[A-Za-zÀ-ỹ]", tail):
+                 seller, seller_index = tail[:150], idx
+                 break
+-        m = re.search(r"\b(?:seller|supplier)\s*[:;]\s*(.{4,120})$", plain)
+-        if m:
+-            seller = original[len(original) - len(m[1]):].strip(" :;.,")[:150]
+-            seller_index = idx
+-            break
++        if re.search(
++            r"\b(?:don\s+vi\s+ban\s+hang|nguoi\s+ban\s+hang|seller|supplier)\s*[:;]?\s*$",
++            plain,
++        ):
++            for next_idx in range(idx + 1, min(seller_end, idx + 4)):
++                next_original, next_plain = lines[next_idx]
++                if re.search(r"\b(?:ma\s+so\s+thue|mst|tax\s*code)\b", next_plain):
++                    continue
++                if (not role_or_metadata(next_original)
++                        and re.search(r"[^\W\d_]", next_original, re.UNICODE)
++                        and len(next_original.strip(" :;.,\u00a0")) >= 3):
++                    seller, seller_index = next_original.strip(" :;.,\u00a0")[:150], idx
++                    break
++            if seller:
++                break
+     tax_codes = []
+-    for idx, (_original, plain) in enumerate(lines[: max(40, buyer_index)]):
+-        match = re.search(r"\b(?:ma\s+so\s+thue|mst|tax\s*code)\s*[:;]?\s*(\d{10}(?:-?\d{3})?)\b", plain)
++    for idx, (_original, plain) in enumerate(lines[:80]):
++        match = re.search(
++            r"\b(?:ma\s+so\s+thue(?:\s+nguoi\s+(?:ban|mua))?|mst(?:\s+nguoi\s+(?:ban|mua))?|tax\s*code)"
++            r"\s*[:;]?\s*(\d{10}(?:-?\d{3})?)\b",
++            plain,
++        )
++        if not match and re.search(
++            r"^\s*(?:ma\s+so\s+thue(?:\s+nguoi\s+(?:ban|mua))?|mst(?:\s+nguoi\s+(?:ban|mua))?|tax\s*code)\s*[:;]?\s*$",
++            plain,
++        ):
++            for next_idx in range(idx + 1, min(len(lines), idx + 3)):
++                standalone = re.fullmatch(r"\s*(\d{10}(?:-?\d{3})?)\s*", lines[next_idx][1])
++                if standalone:
++                    explicit_seller = bool(re.search(r"\b(?:nguoi\s+ban|seller|supplier)\b", plain))
++                    tax_codes.append((idx, standalone[1], explicit_seller))
++                    break
+         if match:
+-            tax_codes.append((idx, match[1]))
++            explicit_seller = bool(re.search(r"\b(?:nguoi\s+ban|seller|supplier)\b", plain))
++            tax_codes.append((idx, match[1], explicit_seller))
+     tax = None
+     if seller_index is not None:
+-        for idx, code in tax_codes:
+-            if seller_index < idx < buyer_index and idx <= seller_index + 8:
+-                tax = code
+-                break
++        explicit = [(idx, code) for idx, code, marked_seller in tax_codes if marked_seller]
++        nearby = [(abs(idx - seller_index), idx, code) for idx, code, _marked_seller in tax_codes if abs(idx - seller_index) <= 12]
++        if explicit:
++            tax = min(explicit, key=lambda entry: abs(entry[0] - seller_index))[1]
++        elif nearby:
++            _distance, _idx, tax = min(nearby, key=lambda entry: (entry[0], entry[1] < seller_index))
+     if tax is None:
+-        for idx, code in tax_codes:
++        for idx, code, _marked_seller in tax_codes:
+             if idx < buyer_index:
+                 tax = code
+                 break
++
++    # If OCR attached a signature/role label to the seller marker, use the
++    # legal-name candidate in the seller header instead. A nearby tax code or
++    # a company-form keyword anchors this fallback; arbitrary body text is not
++    # promoted to a supplier name.
++    if seller is None or role_or_metadata(seller):
++        seller = None
++        header_end = min(buyer_index, seller_end, 40)
++        tax_anchor = next((idx for idx, code, _marked in tax_codes if idx < buyer_index), None)
++        candidates = []
++        # A tax-code anchor is required: bills can contain many plausible
++        # merchant/customer/item strings, so they continue through their
++        # dedicated receipt-header logic instead.
++        if tax_anchor is not None:
++            for idx, (original, plain) in enumerate(lines[:header_end]):
++                if role_or_metadata(original) or re.search(
++                    r"\b(?:don\s+vi\s+ban\s+hang|nguoi\s+ban\s+hang|seller|supplier|"
++                    r"ten\s+don\s+vi|ma\s+so\s+thue|mst|buyer|nguoi\s+mua)\b",
++                    plain,
++                ):
++                    continue
++                candidate = original.strip(" :;.,\u00a0")
++                letters = re.sub(r"[^a-z]", "", plain)
++                if len(letters) < 5 or len(candidate) > 180:
++                    continue
++                company_form = bool(re.search(
++                    r"\b(?:cong\s+ty|co\s+phan|tnhh|doanh\s+nghiep|chi\s+nhanh|"
++                    r"ho\s+kinh\s+doanh|corporation|company|limited|\bltd\b|\binc\b)\b",
++                    plain,
++                ))
++                distance = abs(tax_anchor - idx)
++                candidates.append((not company_form, distance, idx, candidate))
++        if candidates:
++            _not_company_form, _distance, _idx, seller = min(candidates)
+     return seller, tax
+ 
+ 
+ def _amount_and_vat(lines) -> tuple[float | None, float | None]:
+     total = None
+     vat = None
++    total_candidates: list[tuple[int, float]] = []
+     for _original, plain in lines:
+         if vat is None:
+             m = re.search(r"\b(?:thue\s+suat(?:\s+gtgt)?|vat\s*rate)\s*[:;]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%", plain)
+@@ -807,14 +1578,34 @@ def _amount_and_vat(lines) -> tuple[float | None, float | None]:
+                         vat = v
+                 except ValueError:
+                     pass
+-        if total is not None:
++        # A receipt may contain subtotal, tax, cash received, change, and a
++        # final payable row. Prefer explicit payable labels over generic
++        # "Total" and reject tender/change rows instead of taking the first
++        # amount-like word encountered on the page.
++        if re.search(r"\b(?:cash\s+(?:received|tendered)|amount\s+received|change|tien\s+(?:khach\s+dua|thua)|subtotal|(?:tong\s+)?tien\s+hang|cong\s+tien\s+hang|tien\s+thue|vat|tax)\b", plain):
+             continue
+-        m = re.search(
+-            r"\b(?:tong\s+(?:tien\s+)?(?:thanh\s+toan|cong\s+thanh\s+toan)|tong\s+cong(?:\s+tien)?|tong\s+tien\s+phai\s+thanh\s+toan|total\s+amount|amount\s+due|grand\s+total|total)\s*[:;]?\s*([0-9][0-9.,]{3,20})\b",
+-            plain,
++        label_patterns = (
++            (5, r"\b(?:tong\s+tien\s+(?:phai\s+)?thanh\s+toan|tong\s+cong\s+thanh\s+toan|tong\s+thanh\s+toan|grand\s+total|amount\s+due|total\s+payment)\b"),
++            (4, r"\b(?:total\s+amount|total\s+due|payable\s+amount)\b"),
++            (3, r"\b(?:tong\s+cong(?:\s+tien)?|tong\s+tien)\b"),
++            (1, r"\btotal\b"),
+         )
+-        if m:
+-            total = money(m[1])
++        label_priority = next((priority for priority, pattern in label_patterns if re.search(pattern, plain)), None)
++        if label_priority is None:
++            continue
++        amount_match = re.search(r"(?<!\d)([0-9][0-9.,]{2,20})(?!\d)", plain)
++        if amount_match:
++            value = money(amount_match[1])
++            if value is not None:
++                total_candidates.append((label_priority, value))
++
++    if total_candidates:
++        best_priority = max(priority for priority, _value in total_candidates)
++        best_values = {value for priority, value in total_candidates if priority == best_priority}
++        # If equally specific total labels conflict, keep the field empty rather
++        # than guessing which one is the actual amount paid.
++        if len(best_values) == 1:
++            total = next(iter(best_values))
+     return total, vat
+ 
+ 
+@@ -837,7 +1628,12 @@ def _buyer_and_tax(lines) -> tuple[str | None, str | None]:
+     """Extract buyer fields inside the buyer block, not from seller fields."""
+     start = None
+     for idx, (_original, plain) in enumerate(lines[:60]):
+-        if re.search(r"\b(?:ho\s+ten\s+nguoi\s+mua\s+hang|ten\s+don\s+vi|don\s+vi\s+mua\s+hang|buyer(?:\s+name)?)\s*[:;]", plain):
++        if re.search(
++            r"\b(?:ho\s+ten\s+nguoi\s+mua\s+hang|ten\s+nguoi\s+mua(?:\s+hang)?|"
++            r"nguoi\s+mua(?:\s+hang)?|ten\s+don\s+vi|don\s+vi\s+mua\s+hang|"
++            r"buyer(?:\s+name)?)\s*[:;]?",
++            plain,
++        ):
+             start = idx
+             break
+     if start is None:
+@@ -852,27 +1648,96 @@ def _buyer_and_tax(lines) -> tuple[str | None, str | None]:
+     tax = None
+     for original, plain in lines[start:end]:
+         company_match = re.search(
+-            r"\b(?:ten\s+don\s+vi|don\s+vi\s+mua\s+hang|buyer\s+name|buyer\s+company)\s*[:;]\s*(.{3,140})$",
++            r"\b(?:don\s+vi\s+mua\s+hang|ten\s+don\s+vi\s+mua\s+hang|ten\s+don\s+vi|"
++            r"buyer\s+name|buyer\s+company)\s*[:;]?\s*(.{3,140})$",
+             plain,
+         )
+         person_match = re.search(
+-            r"\b(?:ho\s+ten\s+nguoi\s+mua\s+hang|buyer)\s*[:;]\s*(.{3,140})$",
++            r"\b(?:ho\s+ten\s+nguoi\s+mua\s+hang|ten\s+nguoi\s+mua(?:\s+hang)?|"
++            r"nguoi\s+mua(?:\s+hang)?|buyer)\s*[:;]\s*(.{3,140})$",
+             plain,
+         )
+         if company_match:
+             company = original[-len(company_match[1]):].strip(' :;.,')[:150]
+         elif person_match and person is None:
+             person = original[-len(person_match[1]):].strip(' :;.,')[:150]
++        elif re.search(
++            r"^\s*(?:ten\s+don\s+vi|don\s+vi\s+mua\s+hang|buyer\s+(?:name|company))\s*[:;]?\s*$",
++            plain,
++        ):
++            for next_idx in range(start + 1, end):
++                next_original, next_plain = lines[next_idx]
++                if next_original == original or _is_item_table_boundary(next_original):
++                    continue
++                if re.search(r"\b(?:ma\s+so\s+thue|mst|tax\s*code)\b", next_plain):
++                    break
++                if re.search(
++                    r"\b(?:ten\s+nguoi\s+mua|nguoi\s+mua|ho\s+ten|buyer(?:\s+name)?)\b",
++                    next_plain,
++                ):
++                    continue
++                if len(next_original.strip()) >= 3:
++                    company = next_original.strip()[:150]
++                    break
++        elif person is None and re.search(
++            r"^\s*(?:ho\s+ten\s+nguoi\s+mua\s+hang|ten\s+nguoi\s+mua(?:\s+hang)?|"
++            r"buyer(?:\s+name)?)\s*[:;]?\s*$",
++            plain,
++        ):
++            for next_idx in range(start + 1, end):
++                next_original, next_plain = lines[next_idx]
++                if next_original == original or _is_item_table_boundary(next_original):
++                    continue
++                if re.search(r"\b(?:ten\s+don\s+vi|don\s+vi\s+mua\s+hang|buyer\s+name)\b", next_plain):
++                    continue
++                if re.search(r"\b(?:ma\s+so\s+thue|mst|tax\s*code)\b", next_plain):
++                    break
++                if len(next_original.strip()) >= 3:
++                    person = next_original.strip()[:150]
++                    break
+         if tax is None:
+             tax_match = re.search(
+-                r"\b(?:ma\s+so\s+thue|mst|buyer\s+tax\s+code|tax\s+code)\s*[:;]?\s*(\d{10}(?:-?\d{3})?)\b",
++                r"\b(?:ma\s+so\s+thue(?:\s+nguoi\s+mua)?|mst(?:\s+nguoi\s+mua)?|"
++                r"buyer\s+tax\s+code|tax\s+code)\s*[:;]?\s*(\d{10}(?:-?\d{3})?)\b",
+                 plain,
+             )
+             if tax_match:
+                 tax = tax_match[1]
++            elif re.search(
++                r"^\s*(?:ma\s+so\s+thue(?:\s+nguoi\s+mua)?|mst(?:\s+nguoi\s+mua)?|"
++                r"buyer\s+tax\s+code|tax\s+code)\s*[:;]?\s*$",
++                plain,
++            ):
++                for next_idx in range(start + 1, end):
++                    standalone = re.fullmatch(r"\s*(\d{10}(?:-?\d{3})?)\s*", lines[next_idx][1])
++                    if standalone:
++                        tax = standalone[1]
++                        break
+     return company or person, tax
+ 
+ 
++def _receipt_seller(lines) -> str | None:
++    """Use a plausible top-of-receipt merchant line when no seller label exists."""
++    headings = (
++        "hoa don", "receipt", "cash bill", "retail bill", "pos", "bill no",
++        "receipt no", "invoice", "customer copy", "ban le",
++    )
++    excluded = re.compile(
++        r"\b(?:date|ngay|time|gio|address|dia chi|phone|tel|tax|mst|subtotal|"
++        r"total|tong|cong|thue|vat|cash|payment|change|discount|cashier|"
++        r"transaction|receipt|invoice|bill|pos)\b"
++    )
++    for original, plain in lines[:10]:
++        if any(term in plain for term in headings) or excluded.search(plain):
++            continue
++        letters = re.sub(r"[^a-z]", "", plain)
++        digits = re.sub(r"\D", "", original)
++        if len(letters) < 3 or len(digits) > 5 or len(original) > 160:
++            continue
++        return original.strip(" \t:;.-")[:150] or None
++    return None
++
++
+ def _financial_amounts(lines) -> tuple[float | None, float | None]:
+     """Read explicitly labelled subtotal and VAT paid; no automatic guessing."""
+     subtotal = vat_amount = None
+@@ -902,9 +1767,24 @@ def _qr_url(raw: str) -> str | None:
+ 
+ def extract_fields(raw: str, ext: str) -> dict:
+     lines = _lines(raw or "")
++    document_type = classify(ext, raw or "")
+     number = _invoice_number(lines)
+     issued = _get_date(lines)
++    if issued is None and document_type == "bill":
++        for original, _plain_line in lines[:12]:
++            match = re.fullmatch(
++                r"\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*",
++                original,
++            )
++            if match:
++                try:
++                    issued = date(int(match[3]), int(match[2]), int(match[1]))
++                    break
++                except ValueError:
++                    continue
+     seller, seller_tax = _seller_and_tax(lines)
++    if seller is None and document_type == "bill":
++        seller = _receipt_seller(lines)
+     total, vat_rate = _amount_and_vat(lines)
+     subtotal, vat_amount = _financial_amounts(lines)
+     buyer, buyer_tax = _buyer_and_tax(lines)
+@@ -921,11 +1801,14 @@ def extract_fields(raw: str, ext: str) -> dict:
+         "total_amount": total,
+         "vat_rate": vat_rate,
+         "qr_url": _qr_url(raw or ""),
+-        "document_type": classify(ext, raw or ""),
++        "document_type": document_type,
+     }
+-    # Not a calibrated AI/OCR probability, only a ratio of five populated fields.
+-    essential = ("invoice_number", "invoice_date", "seller_name", "seller_tax_code", "total_amount")
+-    fields["confidence_score"] = round(sum(fields[k] is not None for k in essential) / 5, 2)
++    # This is a completeness ratio, not OCR accuracy. Retail receipts do not
++    # require a seller tax code; electronic/unknown documents keep the stricter set.
++    essential = ("invoice_number", "invoice_date", "seller_name", "total_amount")
++    if document_type != "bill":
++        essential = essential[:3] + ("seller_tax_code",) + essential[3:]
++    fields["confidence_score"] = round(sum(fields[k] is not None for k in essential) / len(essential), 2)
+     return fields
+ 
+ 
+@@ -933,10 +1816,12 @@ def validate(invoice, items=None) -> list[tuple[str, bool, str]]:
+     tests = []
+     tests.append(("INV-NO", bool(invoice.invoice_number), "Thiếu số hóa đơn"))
+     tests.append(("DATE", bool(invoice.invoice_date), "Thiếu ngày lập hóa đơn"))
++    is_bill = getattr(invoice, "document_type", None) == "bill"
++    seller_tax_present = bool((invoice.seller_tax_code or "").strip())
+     tax = (invoice.seller_tax_code or "").replace("-", "")
+     tests.append((
+         "TAX-CODE",
+-        bool(re.fullmatch(r"\d{10}(?:\d{3})?", tax)),
++        (is_bill and not seller_tax_present) or bool(re.fullmatch(r"\d{10}(?:\d{3})?", tax)),
+         "Thiếu hoặc sai định dạng mã số thuế người bán",
+     ))
+     tests.append((
+@@ -944,9 +1829,11 @@ def validate(invoice, items=None) -> list[tuple[str, bool, str]]:
+         invoice.total_amount is not None and float(invoice.total_amount) >= 0,
+         "Thiếu tổng tiền thanh toán",
+     ))
+-    buyer_tax = (getattr(invoice, "buyer_tax_code", None) or "").replace("-", "")
++    buyer_tax_value = getattr(invoice, "buyer_tax_code", None)
++    buyer_tax_present = bool((buyer_tax_value or "").strip())
++    buyer_tax = (buyer_tax_value or "").replace("-", "")
+     tests.append((
+-        "BUYER-TAX", bool(re.fullmatch(r"\d{10}(?:\d{3})?", buyer_tax)),
++        "BUYER-TAX", (is_bill and not buyer_tax_present) or bool(re.fullmatch(r"\d{10}(?:\d{3})?", buyer_tax)),
+         "Thiếu hoặc sai định dạng mã số thuế người mua",
+     ))
+     subtotal = getattr(invoice, "subtotal", None)
+diff --git a/backend/app/main.py b/backend/app/main.py
+index e0f6ea3..e7bae6d 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Que
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import FileResponse,StreamingResponse,JSONResponse
+ from fastapi.encoders import jsonable_encoder
++from starlette.concurrency import run_in_threadpool
+ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.security import HTTPAuthorizationCredentials
+ from pydantic import BaseModel, EmailStr, Field, field_validator
+@@ -25,6 +26,7 @@ from .core import Base,engine,db_session,current_user,require_roles,settings,has
+ from .models import *
+ from .extraction import text_from_file,extract_fields,extract_line_items,validate
+ from .risk_checks import assess_invoice_risks
++from .ocr_runtime import extract_document
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -106,6 +108,11 @@ def inv_ser(i,db,details=False):
+     payload={'id':i.id,'file_id':i.file_id,'filename':f.original_filename,'uploaded_by':f.uploaded_by,'invoice_number':i.invoice_number,'invoice_symbol':i.invoice_symbol,'invoice_date':i.invoice_date.isoformat() if i.invoice_date else None,'seller_name':i.seller_name,'seller_tax_code':i.seller_tax_code,'buyer_name':i.buyer_name,'buyer_tax_code':i.buyer_tax_code,'currency':i.currency,'subtotal':decimal(i.subtotal),'vat_rate':decimal(i.vat_rate),'vat_amount':decimal(i.vat_amount),'total_amount':decimal(i.total_amount),'confidence_score':i.confidence_score,'validation_status':i.validation_status,'approval_status':i.approval_status,'lookup_status':i.lookup_status,'document_type':i.document_type,'source_type':source_type,'qr_url':i.qr_url,'created_at':i.created_at.isoformat() if i.created_at else None,'updated_at':i.updated_at.isoformat() if i.updated_at else None}
+     if details:
+         payload['items']=[{'id':x.id,'line_no':x.line_no,'description':x.description,'unit':x.unit,'quantity':decimal(x.quantity),'unit_price':decimal(x.unit_price),'amount':decimal(x.amount)} for x in db.scalars(select(InvoiceItem).where(InvoiceItem.invoice_id==i.id).order_by(InvoiceItem.line_no)).all()]
++        latest_extraction=db.scalar(select(ExtractionRun).where(ExtractionRun.invoice_id==i.id).order_by(desc(ExtractionRun.id)).limit(1))
++        metadata=(latest_extraction.extracted_json or {}).get('_ocr') if latest_extraction else None
++        if metadata:
++            # Full text/boxes/candidates stay in extraction_runs, not list APIs.
++            payload['ocr']={k:metadata[k] for k in ('requested_pipeline','used_pipeline','fallback','reason','requires_review','confidence_semantics','findings','truncated') if k in metadata}
+         # Only show findings from the most recent validation run. Older failures
+         # remain in validation_results for audit/history; they are not current warnings.
+         latest_round=db.scalar(
+@@ -381,12 +388,14 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(db_session
+         db.add(i);db.flush()
+         _phase2_write_optional(db,'invoice_files',f.id,{'storage_url':f'/api/v1/invoices/{i.id}/file'})
+         _phase2_write_optional(db,'invoices',i.id,{'source_type':'xml' if ext=='xml' else 'ocr'})
+-        raw,method='', 'not-processed';err=None
++        raw,method='', 'not-processed';err=None;ocr_metadata=None
+         try:
+-            raw,method=text_from_file(data,ext)
+-            extracted=extract_fields(raw,ext)
++            result=await run_in_threadpool(extract_document,data,ext,pipeline=settings.ocr_pipeline,
++                                           fallback=settings.ocr_hybrid_fallback,max_pages=settings.ocr_hybrid_max_pages,
++                                           legacy_reader=text_from_file)
++            raw,method=result.raw_text,result.method
++            extracted=result.fields;extracted_items=result.items;ocr_metadata=result.metadata
+             for k,v in extracted.items():setattr(i,k,v)
+-            extracted_items=extract_line_items(data,ext,raw)
+             for item in extracted_items:
+                 values={key:value for key,value in item.items() if key!='line_no'}
+                 db.add(InvoiceItem(invoice_id=i.id,line_no=item['line_no'],**values))
+@@ -394,7 +403,12 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(db_session
+         except Exception as ex:
+             logger.exception("Invoice extraction failed (invoice_id=%s, file_type=%s)", i.id, ext)
+             extracted={};extracted_items=[];err=str(ex)[:250];method='failed';i.validation_status='error'
++            if settings.ocr_pipeline in ('hybrid_v6','hybrid_v7'):
++                ocr_metadata={'requested_pipeline':settings.ocr_pipeline,'used_pipeline':'none','fallback':False,
++                              'reason':'extraction_failed','requires_review':True,
++                              'findings':[{'code':'EXTRACTION_FAILED'}]}
+         extraction_payload={**extracted,'items':extracted_items} if not err else extracted
++        if ocr_metadata:extraction_payload['_ocr']=ocr_metadata
+         db.add(ExtractionRun(invoice_id=i.id,method=method,raw_text=raw,extracted_json=jsonable_encoder(extraction_payload),confidence_score=i.confidence_score,status='failed' if err else 'completed',error_message=err))
+         if not err:validators(db,i)
+         notify(db,user.id,'K\u1ebft qu\u1ea3 x\u1eed l\u00fd h\u00f3a \u0111\u01a1n',f'H\u00f3a \u0111\u01a1n #{i.id} \u0111\u00e3 x\u1eed l\u00fd; tr\u1ea1ng th\u00e1i ki\u1ec3m tra: {i.validation_status}',invoice_id=i.id,event_type='extraction_finished')
+diff --git a/web/src/InvoiceDetailPage.jsx b/web/src/InvoiceDetailPage.jsx
+index 765d9b1..ae644f0 100644
+--- a/web/src/InvoiceDetailPage.jsx
++++ b/web/src/InvoiceDetailPage.jsx
+@@ -3,6 +3,8 @@ import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Plus, Save, Trash2
+ import { api, approvalName, datefmt, documentTypeName } from './api';
+ import { invoiceItemDrafts, invoiceItemPayload, moneyOrDash } from './viewUtils';
+ import { formatLookupTimestamp, initialLookupOutcome, isSafeHttpUrl } from './lookupUtils';
++import { completenessLabel, ocrRuntimeNotice } from './ocrRuntimeInfo';
++import './InvoiceDetailPage.css';
+ 
+ const editableFields = [
+   ['invoice_number', 'Số hóa đơn'], ['invoice_symbol', 'Ký hiệu hóa đơn'], ['invoice_date', 'Ngày lập'],
+@@ -99,15 +101,24 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
+ 
+       <section className="panel">
+         <div className="panel-heading"><div><h3>Hóa đơn {data.invoice_number || `#${id}`}</h3><span className="helper">{data.seller_name || "Chưa xác định nhà cung cấp"}</span></div><Status value={data.approval_status}/></div>
+-        <div className="pill-row"><Status value={data.validation_status}/><Status value={data.lookup_status}/><span className="pill" title="Tỷ lệ đầy đủ của các trường dữ liệu chính; đây không phải độ chính xác OCR.">Trường đã có dữ liệu ·{Math.round((data.confidence_score ?? 0) * 100)}%</span></div>
++        <div className="pill-row"><Status value={data.validation_status}/><Status value={data.lookup_status}/><span className="pill" title="Tỷ lệ đầy đủ của các trường dữ liệu chính; đây không phải độ chính xác OCR.">{completenessLabel(data.confidence_score)}</span></div>
+         {isSafeHttpUrl(data.qr_url) && <p className="helper">Liên kết QR hóa đơn:<a href={data.qr_url} target="_blank" rel="noopener noreferrer">{data.qr_url}</a></p>}
+-        <div className="field-grid">{form && editableFields.map(([key, label]) => <label key={key}>{label}<input type={key === 'invoice_date' ? 'date' : ['subtotal', 'vat_rate', 'vat_amount', 'total_amount'].includes(key) ? 'number' : 'text'} step={['subtotal', 'vat_rate', 'vat_amount', 'total_amount'].includes(key) ? '0.01' : undefined} disabled={!canEdit} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}</div>
++        <p className="ocr-review-note" role="note">Kết quả OCR là bản nháp. Hãy đối chiếu từng trường và dòng hàng với chứng từ gốc; giá trị có dữ liệu không đồng nghĩa với đã được xác minh.</p>
++        {ocrRuntimeNotice(data.ocr) && <p className="ocr-review-note" role="status">{ocrRuntimeNotice(data.ocr)}</p>}
++        <div className="field-grid">{form && editableFields.map(([key, label]) => {
++          const missing = String(form[key] ?? '').trim() === '';
++          return <label key={key} className={missing ? 'field-needs-review' : ''}>
++            <span className="field-label">{label}{missing && <em className="field-review-flag">Chưa trích xuất</em>}</span>
++            <input type={key === 'invoice_date' ? 'date' : ['subtotal', 'vat_rate', 'vat_amount', 'total_amount'].includes(key) ? 'number' : 'text'} step={['subtotal', 'vat_rate', 'vat_amount', 'total_amount'].includes(key) ? '0.01' : undefined} disabled={!canEdit} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/>
++          </label>;
++        })}</div>
+ 
+         <div className="line-items-heading"><h3>Dòng hàng hóa/dịch vụ</h3>{canEdit && <button className="btn btn-muted btn-small" onClick={() => setForm(current => ({ ...current, items: [...current.items, { description: '', unit: '', quantity: '', unit_price: '', amount: '' }] }))}><Plus size={15}/>Thêm dòng hàng</button>}</div>
+         {form?.items?.length ? <div className="line-items-scroll"><div className="line-item-table">
+-          <div className="line-item-row line-item-header"><span>Tên hàng hóa/dịch vụ</span><span>Số lượng</span><span>Đơn giá</span><span>Số tiền</span>{canEdit && <span/>}</div>
++          <div className="line-item-row line-item-header"><span>Tên hàng hóa/dịch vụ</span><span>Đơn vị</span><span>Số lượng</span><span>Đơn giá</span><span>Số tiền</span>{canEdit && <span/>}</div>
+           {form.items.map((item, index) => <div className="line-item-row" key={index}>
+             <input aria-label={`Dòng hàng ${index + 1} tên`} disabled={!canEdit} value={item.description} onChange={event => updateItem(index, 'description', event.target.value)} />
++            {canEdit ? <input aria-label={`Dòng hàng ${index + 1} đơn vị`} value={item.unit} maxLength={30} onChange={event => updateItem(index, 'unit', event.target.value)} placeholder="—" /> : <span>{item.unit || '—'}</span>}
+             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} số lượng`} type="number" min="0" step="any" value={item.quantity} onChange={event => updateItem(index, 'quantity', event.target.value)} placeholder="—" /> : <span>{item.quantity === '' ? '—' : item.quantity}</span>}
+             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} đơn giá`} type="number" min="0" step="any" value={item.unit_price} onChange={event => updateItem(index, 'unit_price', event.target.value)} placeholder="—" /> : <span className="line-item-money">{moneyOrDash(item.unit_price)}</span>}
+             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} thành tiền`} type="number" min="0" step="any" value={item.amount} onChange={event => updateItem(index, 'amount', event.target.value)} placeholder="Bắt buộc" /> : <span className="line-item-money">{moneyOrDash(item.amount)}</span>}

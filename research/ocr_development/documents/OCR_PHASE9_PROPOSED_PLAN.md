@@ -1,0 +1,12 @@
+# Đề xuất Giai đoạn 9 — sau Web UAT Phase8
+
+Ngày 19/11/2026. **Đề xuất, chưa triển khai.** Căn cứ [bằng chứng Web UAT](OCR_PHASE8_WEB_UAT.md); không coi Phase7 đã nghiệm thu.
+
+1. **Giữ baseline frozen, tạo nhánh module thử nghiệm mới khi được phê duyệt.** Không sửa V6 tại chỗ hoặc thay default. Dùng ba bill hiện tại như development/integration đã biết, không gọi chúng là held-out. Tách việc sửa engine/parser khỏi sửa dữ liệu test hoặc kết quả người dùng đã chỉnh tay.
+2. **Đọc ký tự số/ngày và liên kết nhãn–giá trị.** #25 sai chuỗi số và tháng; phân tích OCR crop/box/candidate từng bước, phân biệt lỗi nhận dạng với chọn ứng viên. Dùng dữ liệu development khác nhà cung cấp, không thêm regex/cấu hình riêng Năm Oánh hoặc sửa dựa vào đáp án Phase7. Khi thiếu bằng chứng, giữ literal/candidate và yêu cầu review, không tự sửa chữ số.
+3. **Bảng và đơn vị theo cột/hàng.** #26 ghép khoản khuyến mãi vào mô tả; #28 mất hàng, sai đơn vị và giá, thiếu lượng. Kiểm tra ranh giới hàng/SKU, mô tả xuống dòng, nhãn giá đăng ký so với giá bán, modifier/discount, nhóm ô số/đơn vị; kiểm tra số học chỉ phát hiện mâu thuẫn, không sinh số để khớp tổng.
+4. **Thống nhất phạm vi tài chính/validation với người phụ trách nghiệp vụ.** Nguồn bill có nhãn tiền hàng chưa chắc trước VAT; ITEM-SUM hiện false khi subtotal không có dù sum=total. Đề xuất hiển thị rõ thiếu cơ sở đối chiếu và lệch số học là hai nguyên nhân khác nhau; không tự nới rule, điền subtotal bằng total hoặc bỏ validation. Chỉ đổi quy tắc sau khi đối chiếu SRS và được phê duyệt.
+5. **Mở rộng kiểm chứng thực tế có quyền dùng.** Cần VAT thật có MST/rate/tiền VAT đọc rõ, bill có nhiều mức thuế, PDF text/scan/nhiều trang và ảnh chất lượng đa dạng. Nguồn/nhãn được người đọc xác minh; chưa dùng bộ 24 Phase7 cho phát triển hoặc benchmark khi vẫn tạm dừng. Chỉ mở lại nghiệm thu độc lập khi đủ điều kiện và có yêu cầu.
+6. **Regression và vận hành.** Mỗi thay đổi có unit/API regression, rồi Uvicorn/PostgreSQL test và browser edit/fallback; kiểm tra thêm Accountant/Admin theo RBAC. Bổ sung đánh giá timeout/queue/tải đồng thời và lỗi engine tự nhiên, bảo toàn evidence/correction/audit. Bằng chứng/trace phải loại thông tin đăng nhập và token; không upload ra dịch vụ ngoài khi chưa được phép.
+
+Ưu tiên P1/P2 (mất hàng/sai số/ngày), sau đó P3 (validation/scope) và P4 (nguồn mới/vận hành). Giữ Web hiện có, review thủ công và cơ chế current/fallback; chưa đổi kiến trúc lớn, schema hoặc cài mô hình mới. Không đề nghị nghiệm thu OCR khi còn lỗi và thiếu coverage.
