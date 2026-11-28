@@ -14,7 +14,7 @@ def main():
     parser.add_argument('--public-casso',action='store_true',help='Explicit use of the authorized official Public Starter Key')
     args=parser.parse_args()
     from app.core import settings,engine,Base
-    from app import models,finance,approval_sla
+    from app import models,finance,approval_sla,travel
     from sqlalchemy import inspect,text
     if engine.url.get_backend_name()!='postgresql':
         raise RuntimeError('This launcher requires the configured PostgreSQL database')

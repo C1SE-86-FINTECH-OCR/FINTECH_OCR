@@ -183,6 +183,7 @@ class Notification(Base):
     user_id:Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
     invoice_id:Mapped[int|None]=mapped_column(ForeignKey('invoices.id'))
     schedule_id:Mapped[int|None]=mapped_column(ForeignKey('schedules.id'))
+    travel_case_id:Mapped[int|None]=mapped_column(Integer,nullable=True,index=True)
     title:Mapped[str]=mapped_column(String(255))
     message:Mapped[str]=mapped_column(Text)
     is_read:Mapped[bool]=mapped_column(Boolean,default=False)

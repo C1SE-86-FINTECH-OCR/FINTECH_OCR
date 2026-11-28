@@ -26,6 +26,7 @@ def route(question,context):
  q=finance.fold(question)
  internal_finance=any(x in q for x in ('hoa don','chi tieu','chi phi','ngan sach','han muc','tong tien','thong ke','vat','kiem tra so lieu'))
  if re.search(r'(api.?key|mat khau|password|token|secret|ignore previous|bo qua.*quy tac)',q):return 'security'
+ if any(x in q for x in ('tam ung','hoan ung','quyet toan','chi phi cong tac','chi phi chuyen','chuyen cong tac nay')) and not any(x in q for x in ('ma so thue','mst','tra cuu thue','hoa don hop phap','hoa don gia','tinh hop phap','rui ro','gian lan','trung lap','trung hoa don','confidence','do tin cay','so hoc','kiem tra so lieu','vat','ngan sach','phan loai')):return 'travel'
  if any(x in q for x in ('hom nay ngay','bay gio la ngay','thu may hom nay')):return 'date'
  if not internal_finance and any(x in q for x in ('khach san','nha nghi','so dien thoai','thong tin lien he','dia chi o dau','gia phong','moi nhat','tin tuc','thoi tiet')):return 'external'
  if context.get('last_kind')=='external' and not internal_finance and 'mst' not in q and len(q)<180:return 'external'
@@ -97,6 +98,11 @@ def execute(db,user,question,context,services):
  result={'kind':kind,'context':state,'finance_analysis':None,'verification_report':None}
  q=finance.fold(question)
  if kind=='security':answer='Không cung cấp khóa, mật khẩu hoặc thông tin xác thực. Chat chỉ truy vấn dữ liệu trong phạm vi quyền của bạn.'
+ elif kind=='travel':
+  from . import travel
+  answer=travel.chat_answer(db,user,question,context)
+  match=re.search(r'(?:ho so|chuyen cong tac|chuyen)\s*#?(\d+)\b',q)
+  if match:state['travel_case_id']=int(match.group(1))
  elif kind=='date':answer='Hôm nay là '+datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%d/%m/%Y')+' (giờ Việt Nam).'
  elif kind=='external':
   state['external_question']=(str(context.get('external_question',''))+'\n'+question)[-1600:]

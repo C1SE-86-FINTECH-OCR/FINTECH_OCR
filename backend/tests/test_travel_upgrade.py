@@ -102,7 +102,7 @@ def test_legacy_chat_backfill_preserves_history(api_env):
         connection.execute(text('ALTER TABLE conversations DROP COLUMN updated_at'))
         upgrade(connection)
         upgrade(connection)
-        assert 'expense_budgets' in inspect(connection).get_table_names()
+        assert 'travel_evidence' in inspect(connection).get_table_names()
     detail = client.get(f'/api/v1/chatbot/conversations/{conv_id}', headers=headers(users, 'employee1')).json()
     assert detail['messages'][0]['content'] == 'Still available'
     assert detail['updated_at'].startswith('2025-10-01T12:00:00')

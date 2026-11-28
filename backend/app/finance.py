@@ -85,6 +85,9 @@ def expense_rows(db,user,starts=None,ends=None,team=None,category=None,employee_
     .join(User,InvoiceFile.uploaded_by==User.id).outerjoin(ExpenseAssignment,ExpenseAssignment.invoice_id==Invoice.id))
  if user.role=='employee':q=q.where(InvoiceFile.uploaded_by==user.id)
  rows=db.execute(q.order_by(case((Invoice.approval_status=='approved',0),else_=1),Invoice.id)).all();seen=set();result=[]
+ from .travel import official_invoice_costs
+ rows=official_invoice_costs(db,rows)
+ rows.sort(key=lambda row:(not getattr(row[0],'_travel_official',False),row[0].approval_status!='approved',row[0].id))
  from sqlalchemy import func
  latest=select(func.max(ExtractionRun.id)).where(ExtractionRun.invoice_id.in_([r[0].id for r in rows])).group_by(ExtractionRun.invoice_id)
  metadata={r.invoice_id:(r.extracted_json or {}).get('_ocr',{}) for r in db.scalars(select(ExtractionRun).where(ExtractionRun.id.in_(latest))).all()}
@@ -119,12 +122,14 @@ def budget_usage(db,budget,user):
   if invoice.total_amount is None:missing+=1;continue
   if invoice.approval_status=='approved':approved+=Decimal(str(invoice.total_amount))
   else:pending+=Decimal(str(invoice.total_amount))
+ from .travel import manual_budget_cost
+ manual=manual_budget_cost(db,budget,user);approved+=manual
  amount=Decimal(str(budget.amount));percent=approved*100/amount if amount>0 and not missing else None
  return {'id':budget.id,'starts_on':str(budget.starts_on),'ends_on':str(budget.ends_on),'team':budget.team,'category':budget.category,
   'currency':budget.currency,'limit':str(amount),'approved':str(approved),'pending':str(pending),'remaining':str(amount-approved) if not missing else None,
   'utilization_percent':str(percent) if percent is not None else None,'missing_amounts':missing,
   'alerts':[v for v in budget.thresholds if (percent is not None and percent>=Decimal(str(v))) or (amount==0 and approved>0)],
-  'projected_over_budget':approved+pending>amount,'thresholds':budget.thresholds,'version':budget.version}
+  'projected_over_budget':approved+pending>amount,'thresholds':budget.thresholds,'version':budget.version,'travel_manual_approved':str(manual)}
 
 def invoice_status_counts(db,user,starts=None,ends=None,team=None,category=None,employee_id=None,supplier=None):
  from sqlalchemy import func,or_
