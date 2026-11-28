@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app import main,tax_verification
 from app.core import make_token
 from app.models import Invoice,InvoiceFile,ChatMessage
-from tests.test_phase2_api import api_env
+from tests.api_support import api_env
 
 def test_secretstr_redaction_preserves_real_configuration_contract(monkeypatch):
     from pydantic import SecretStr

@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 
 from app.models import Invoice, InvoiceFile, InvoiceItem
-from tests.test_phase2_api import _token, api_env
+from tests.api_support import _token, api_env
 
 
 def test_report_search_totals_and_formatted_full_export(api_env):

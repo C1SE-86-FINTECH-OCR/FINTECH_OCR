@@ -3,7 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 
 from app.models import Invoice, InvoiceFile
-from tests.test_phase2_api import _token, api_env
+from tests.api_support import _token, api_env
 
 
 def test_profile_invoice_period_and_access(api_env):

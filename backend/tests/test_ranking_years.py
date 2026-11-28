@@ -2,7 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.models import AuditLog, Schedule
-from tests.test_phase2_api import _token, api_env
+from tests.api_support import _token, api_env
 
 
 def test_ranking_years_completion_dates_and_ties(api_env):

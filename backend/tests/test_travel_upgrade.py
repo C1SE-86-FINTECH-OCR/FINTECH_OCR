@@ -11,7 +11,7 @@ from sqlalchemy import inspect, select, text
 from app import main
 from app.core import make_token
 from app.models import ChatMessage, Conversation, Invoice, Schedule
-from tests.test_phase2_api import api_env
+from tests.api_support import api_env
 
 
 def headers(users, name):

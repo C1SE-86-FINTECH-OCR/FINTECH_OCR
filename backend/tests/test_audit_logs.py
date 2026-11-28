@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from app.models import AuditLog, User
-from tests.test_phase2_api import api_env, _token
+from tests.api_support import api_env, _token
 
 
 def test_audit_logs_permissions_and_actor_name(api_env):
