@@ -983,3 +983,243 @@ def validate(invoice, items=None) -> list[tuple[str, bool, str]]:
     else:
         tests.append(("ITEM-SUM", False, "Thiếu danh sách dòng hàng để đối chiếu tiền trước thuế"))
     return tests
+
+
+# Task bridges: keep the main parser contracts; new finance observations are independent.
+from contextlib import contextmanager
+from contextvars import ContextVar
+from decimal import Decimal, InvalidOperation
+from .invoice_financials import current_document_text
+_coverage_observations=ContextVar('ocr_extraction_coverage',default=None)
+MAX_OCR_PAGES=12
+MAX_OCR_TEXT_CHARS=60_000
+def _total_cell_bounds(image,row,label):
+    """Use actual table borders or OCR word boxes; never fixed page columns."""
+    top=min(w[1] for w in label);bottom=max(w[3] for w in label)
+    height=max(9,bottom-top);label_right=max(w[2] for w in label)
+    y0,y1=max(0,int(top-height*.25)),min(image.height,int(bottom+height*.2))
+    # Long vertical rules survive across neighbouring rows, unlike digit stems.
+    try:
+        import cv2
+        import numpy as np
+        band_top=max(0,int(top-height*2));band_bottom=min(image.height,int(bottom+height*2))
+        band=np.asarray(image.crop((0,band_top,image.width,band_bottom)).convert('L'))
+        binary=cv2.threshold(band,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+        rules=cv2.morphologyEx(binary,cv2.MORPH_OPEN,np.ones((max(18,int(band.shape[0]*.65)),1),np.uint8))
+        xs=np.where((rules>0).sum(axis=0)>=band.shape[0]*.65)[0]
+        groups=[]
+        for x in xs:
+            if groups and x-groups[-1][-1]<=3:groups[-1].append(int(x))
+            else:groups.append([int(x)])
+        borders=[sum(g)/len(g) for g in groups]
+        if len(borders)>=2:
+            left,right=borders[-2:]
+            if left>label_right and image.width*.045<=right-left<=image.width*.5:
+                return (int(left)+3,y0,min(image.width,int(right)-2),y1)
+    except Exception:
+        # Optional geometric recovery must never discard the primary OCR text.
+        pass
+    candidates=[w for w in row if w[0]>label_right and _money_from_numeric_crop(str(w[4])) is not None]
+    if not candidates:return None
+    word=max(candidates,key=lambda w:w[2]);pad=max(2,int(height*.2))
+    return (max(int(label_right)+1,int(word[0])-pad),y0,min(image.width,int(word[2])+pad),y1)
+
+
+def _payable_label_words(row):
+    """Match a payment label, not the neighbouring numeric cells or VAT header."""
+    label=[w for w in row if not re.fullmatch(r"[\d.,%|()]+", str(w[4]).strip())]
+    plain=" ".join(_plain(str(w[4])) for w in label)
+    if _financial_row_kind(plain) in ('vat_amount','subtotal'):return []
+    tokens=set(re.findall(r"[a-z]+",plain))
+    if not ('tong' in tokens or {'cong','tien','thanh','toan'}<=tokens or {'grand','total'}<=tokens or {'total','amount'}<=tokens or {'amount','due'}<=tokens):
+        return []
+    targets=('tong tien thanh toan','tong cong thanh toan','tong cong tien thanh toan','tong thanh toan','tong tien phai thanh toan','grand total','total amount','amount due')
+    candidates=[(SequenceMatcher(None," ".join(_plain(str(w[4])) for w in label[start:start+size]).strip('():;.,'),target).ratio(),start,size)
+               for start in range(len(label)) for size in range(2,min(9,len(label)-start+1)) for target in targets]
+    score,start,size=max(candidates,default=(0,0,0))
+    return label[start:start+size] if score>=.77 else []
+
+
+def _coverage_finding(code, reason, **details):
+    observations = _coverage_observations.get()
+    if observations is not None:
+        finding = {'code': code, 'reason': reason, 'incomplete': True,
+                   'requires_review': True, **details}
+        if finding not in observations:
+            observations.append(finding)
+
+
+@contextmanager
+def capture_extraction_coverage():
+    observations = []
+    token = _coverage_observations.set(observations)
+    try:
+        yield observations
+    finally:
+        _coverage_observations.reset(token)
+
+
+def currency_observation(raw):
+    """Use explicit printed currency labels; never infer USD from a '$' sign."""
+    plain=_plain(raw or '')
+    codes=set(re.findall(r'\b(?:don vi tien te|tien te|currency|dvtte)\s*(?:\([^\n)]{0,35}\)\s*)?[:：]?\s*([a-z]{3})\b',plain))
+    if len(codes)>1:return {'state':'conflicting','codes':sorted(code.upper() for code in codes)}
+    if codes:return {'state':'observed','code':next(iter(codes)).upper()}
+    return {'state':'not_observed'}
+
+
+def _observed_vat_rates(lines):
+    rates = set()
+    for _original, plain in lines:
+        for match in re.finditer(r'\b(?:thue\s+suat(?:\s+gtgt)?|vat\s*rate)\s*[:;]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%', plain):
+            rate = Decimal(match[1].replace(',', '.'))
+            if 0 <= rate <= 100:
+                rates.add(rate)
+    return rates
+
+
+def _xml_decimal(raw, tag, *, quantity=False):
+    """XML decimal literals use '.' as a decimal point, not VND grouping.
+
+    Keep missing/zero distinct and decline unsupported database precision;
+    never round source values silently or pass money through binary floats.
+    """
+    if raw is None or not str(raw).strip():
+        return None
+    literal = str(raw).strip()
+    if len(literal) > 100:
+        return None
+    try:
+        value = (Decimal(literal) if re.fullmatch(r'\+?\d+(?:\.\d+)?', literal)
+                 else _spatial_quantity(literal) if quantity else _decimal_money(literal))
+        limit = Decimal('999999999999999.999') if quantity else Decimal('9999999999999999.99')
+        quantum = Decimal('.001') if quantity else Decimal('.01')
+        if value is None or not value.is_finite() or value < 0 or value > limit:
+            return None
+        if value != value.quantize(quantum):
+            _coverage_finding('XML_NUMERIC_PRECISION_UNSUPPORTED',
+                              'Giá trị XML vượt độ chính xác cột hiện có; giữ nguồn, không làm tròn hoặc tự điền.', field=tag)
+            return None
+        return value
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _decimal_money(raw):
+    """Parse printed money without losing cents through a binary float."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    s = re.sub(r'^\s*(?:VND|VNĐ|₫)\s*|\s*(?:VND|VNĐ|dong|đ|d|₫)\s*$', '', str(raw), flags=re.I).strip()
+    if re.search(r'\s', s):
+        if not re.fullmatch(r'-?\d{1,3}(?:\s+\d{3})+(?:[.,]\d{1,2})?', s):
+            return None
+        s = ''.join(s.split())
+    if not re.fullmatch(r'-?\d+(?:[.,]\d+)*', s):
+        return None
+    if not s or s in ("-", ".", ","):
+        return None
+    if "," in s and "." in s:
+        decimal_sep = ',' if s.rfind(',') > s.rfind('.') else '.'
+        grouped, fraction = s.rsplit(decimal_sep, 1)
+        thousands_sep = '.' if decimal_sep == ',' else ','
+        if not re.fullmatch(rf'-?\d{{1,3}}(?:{re.escape(thousands_sep)}\d{{3}})+', grouped) or not 1 <= len(fraction) <= 2:
+            return None
+        s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
+    elif s.count(".") > 1:
+        if not re.fullmatch(r'-?\d{1,3}(?:\.\d{3})+', s):
+            return None
+        s = s.replace(".", "")
+    elif s.count(",") > 1:
+        if not re.fullmatch(r'-?\d{1,3}(?:,\d{3})+', s):
+            return None
+        s = s.replace(",", "")
+    elif "," in s:
+        a, b = s.rsplit(",", 1)
+        s = (a + b) if len(b) == 3 else (a + "." + b)
+    elif "." in s:
+        a, b = s.rsplit(".", 1)
+        s = (a + b) if len(b) == 3 else s
+    try:
+        value = Decimal(s)
+        if not value.is_finite() or value < 0 or value > Decimal("9999999999999999"):
+            return None
+        return value
+    except (InvalidOperation, ValueError, OverflowError):
+        return None
+
+
+def _spatial_quantity(cell: str) -> Decimal | None:
+    value = " ".join((cell or "").split()).strip()
+    if re.fullmatch(r"\d{1,8}(?:[.,]\d{1,4})?", value):
+        # Quantity separators are decimal marks, not VND thousands groups.
+        return Decimal(value.replace(',', '.'))
+    return None
+
+
+_legacy_main_total_recovery=_recover_total_from_image
+def _recover_total_from_image(image) -> Decimal | None:
+    """Recover only from a labelled, spatially bounded cell and two OCR reads.
+
+    Dense invoices can put VAT and payable totals in adjacent columns. The old
+    fixed 65%/82% crops mixed these cells and cut the rightmost printed digits.
+    Their rejection was safe but prevented a valid total from being extracted.
+    """
+    from PIL import Image,ImageOps
+    had_label=False
+    bounded_attempted=False
+    for psm in (11,6):
+        if psm==6 and not had_label:break
+        try:words=_tesseract_word_boxes(image,psm=psm)
+        except (pytesseract.TesseractError,RuntimeError):continue
+        findings=set();attempts=0
+        for row in _spatial_lines(words):
+            label=_payable_label_words(row)
+            if not label:continue
+            had_label=True
+            bounds=_total_cell_bounds(image,row,label)
+            if bounds is None:continue
+            left,top,right,bottom=bounds
+            if right<=left or bottom<=top:continue
+            bounded_attempted=True
+            attempts+=1
+            crop=ImageOps.autocontrast(image.crop(bounds).convert('L'))
+            if crop.width*crop.height<=1_000_000:crop=crop.resize((crop.width*3,crop.height*3),Image.Resampling.LANCZOS)
+            crop=ImageOps.expand(crop,border=8,fill='white')
+            values=[]
+            for mode in (7,13):
+                try:
+                    literal=pytesseract.image_to_string(crop,lang='eng',config=f'--psm {mode} -c tessedit_char_whitelist=0123456789.,%',timeout=12)
+                except (pytesseract.TesseractError,RuntimeError):continue
+                value=_decimal_money(literal.strip())
+                if value is not None:values.append(value)
+            if len(values)==2 and values[0]==values[1]:findings.add(values[0])
+            if attempts>=3:break
+        if len(findings)>1:return None
+        if len(findings)==1:return next(iter(findings))
+    return None if bounded_attempted else _legacy_main_total_recovery(image)
+
+
+def _spatial_lines(words) -> list[list[tuple[float, float, float, float, str]]]:
+    """Cluster OCR/PDF words into visual rows using their bounding boxes."""
+    ordered = sorted(words, key=lambda word: (word[1], word[0]))
+    rows: list[list[tuple[float, float, float, float, str]]] = []
+    for word in ordered:
+        if not word[4] or not str(word[4]).strip():
+            continue
+        if rows and abs(word[1] - sum(item[1] for item in rows[-1]) / len(rows[-1])) <= max(2.5, (word[3] - word[1]) * 0.32):
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    return [sorted(row, key=lambda word: word[0]) for row in rows]
+
+
+def _tesseract_word_boxes(image, psm=6) -> list[tuple[float, float, float, float, str]]:
+    data = pytesseract.image_to_data(
+        image, lang="vie+eng", config=f"--psm {psm}", output_type=pytesseract.Output.DICT, timeout=35
+    )
+    return [
+        (float(data["left"][i]), float(data["top"][i]),
+         float(data["left"][i] + data["width"][i]),
+         float(data["top"][i] + data["height"][i]), str(data["text"][i]))
+        for i in range(len(data.get("text", []))) if str(data["text"][i]).strip()
+    ]

@@ -33,7 +33,7 @@ test('maps queue stages to ready, measured upload, and server processing states'
   assert.deepEqual(UPLOAD_QUEUE_STAGES.map(({ id }) => id), ['upload', 'ocr', 'ai', 'validation', 'done']);
   const queued = { status: 'queued' };
   assert.equal(uploadQueueStageState(queued, 'upload'), 'pending');
-  assert.equal(uploadQueueStageState(queued, 'ai'), 'unavailable');
+  assert.equal(uploadQueueStageState(queued, 'ai'), 'pending');
 
   const transferring = { status: 'uploading', phase: 'transfer' };
   assert.equal(uploadQueueStageState(transferring, 'upload'), 'active');
@@ -41,21 +41,21 @@ test('maps queue stages to ready, measured upload, and server processing states'
 
   const processing = { status: 'uploading', phase: 'processing' };
   assert.equal(uploadQueueStageState(processing, 'upload'), 'complete');
-  assert.equal(uploadQueueStageState(processing, 'ocr'), 'active');
+  assert.equal(uploadQueueStageState(processing, 'ocr'), 'pending');
   assert.equal(uploadQueueStageState(processing, 'validation'), 'pending');
 });
 
 test('marks returned completion and validation failures without claiming AI progress', () => {
-  const done = { status: 'done' };
+  const done = { status: 'done',invoice:{id:1,validation_status:'valid',ocr:{used_pipeline:'current',llm:{status:'local_only'}}} };
   assert.equal(uploadQueueStageState(done, 'upload'), 'complete');
   assert.equal(uploadQueueStageState(done, 'ocr'), 'complete');
   assert.equal(uploadQueueStageState(done, 'validation'), 'complete');
   assert.equal(uploadQueueStageState(done, 'done'), 'complete');
   assert.equal(uploadQueueStageState(done, 'ai'), 'unavailable');
 
-  const validationFailed = { status: 'failed', failurePhase: 'validation' };
+  const validationFailed = { status: 'failed', failurePhase: 'validation',invoice:{id:1,validation_status:'error',ocr:{used_pipeline:'current',reason:'validation_failed'}} };
   assert.equal(uploadQueueStageState(validationFailed, 'upload'), 'complete');
-  assert.equal(uploadQueueStageState(validationFailed, 'ocr'), 'complete');
+  assert.equal(uploadQueueStageState(validationFailed, 'ocr'), 'unknown');
   assert.equal(uploadQueueStageState(validationFailed, 'validation'), 'failed');
 
   const transferFailed = { status: 'failed', failurePhase: 'transfer' };

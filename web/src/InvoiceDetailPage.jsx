@@ -1,3 +1,6 @@
+import {SLADetail} from './ApprovalSLA.jsx';
+import InvoiceVerificationReport from './InvoiceVerificationReport.jsx';
+import {ExpenseCategoryEditor} from './FinancePage.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ExternalLink, FileText, LoaderCircle, Maximize2, Minimize2, MoveHorizontal, Plus, Save, Trash2, XCircle, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, approvalName, datefmt, documentTypeName } from './api';
@@ -30,6 +33,7 @@ function invoiceDraft(data) {
 
 export default function InvoiceDetailPage({ user, id, data, busy, error, reload, onChanged }) {
   const [form, setForm] = useState(null);
+  const [categoryRevision,setCategoryRevision]=useState(0);
   const [message, setMessage] = useState('');
   const [reject, setReject] = useState('');
   const [lookup, setLookup] = useState(initialLookupOutcome);
@@ -90,6 +94,7 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
     setForm(draft);
     setSavedDraft(snapshot);
   }, [data, id]);
+
 
   useEffect(() => { setPreviewZoom(null); setPdfStatus('loading'); }, [id]);
   useEffect(() => {
@@ -153,8 +158,8 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
       const baseline = JSON.parse(savedDraft || '{}');
       const itemsChanged = JSON.stringify(form.items) !== JSON.stringify(baseline.items);
       const items = itemsChanged ? invoiceItemPayload(form.items) : null;
-      if (items?.some(item => !item.description || item.amount == null || item.amount < 0 || item.quantity < 0 || item.unit_price < 0)) {
-        setMessage('Mỗi dòng hàng cần có tên và thành tiền hợp lệ, không âm. Đơn giá hoặc số lượng chưa có có thể để trống.');
+      if (items?.some(item => !item.description)) {
+        setMessage('Mỗi dòng cần có mô tả. Cột số không có trên chứng từ được để trống; hệ thống sẽ kiểm tra theo loại chứng từ.');
         return;
       }
       const body = Object.fromEntries(Object.entries(form).filter(([key, value]) => key !== 'items'
@@ -198,6 +203,9 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
 
   return <>
     <PageTitle title="Chi tiết hóa đơn" description="Xem chứng từ và thông tin đã trích xuất." action={<button className="btn btn-muted" onClick={() => history.back()}><ChevronLeft size={16}/>Quay lại</button>}/>
+    <SLADetail invoiceId={data.id} revision={JSON.stringify([data.approval_status,data.history])}/>
+    <ExpenseCategoryEditor invoiceId={data.id} onChange={()=>setCategoryRevision(value=>value+1)}/>
+    <InvoiceVerificationReport canAssess={isReviewer} invoiceId={data.id} revision={JSON.stringify([categoryRevision,data.updated_at,data.items,data.subtotal,data.vat_rate,data.vat_amount,data.total_amount])}/>
     <div className="invoice-detail-layout">
     <div className="detail-grid invoice-detail-grid">
       <section className="panel original invoice-original-panel" ref={previewRef}>
@@ -228,7 +236,7 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
             <summary>Chi tiết<span>{warnings.length > 0 ? `${warnings.length} cảnh báo` : 'Thông tin xử lý'}</span></summary>
             <div className="invoice-diagnostics-content">
               {warnings.length > 0 && <><h4>Cảnh báo kiểm tra dữ liệu</h4><ul className="diagnostic-warnings">{warnings.map((warning, index) => <li key={`${warning.rule}-${index}`}><code>{warning.rule}</code><p>{warning.message}</p></li>)}</ul></>}
-              {data.ocr?.confidence?.reason && <p>{data.ocr.confidence.reason}</p>}
+              {data.ocr?.confidence?.reason && !warnings.some(warning => warning.rule === 'CONFIDENCE' && warning.message === data.ocr.confidence.reason) && <p>{data.ocr.confidence.reason}</p>}
               {ocrRuntimeNotice(data.ocr) && <p>{ocrRuntimeNotice(data.ocr)}</p>}
               {llmRuntimeNotice(data.ocr) && <p>{llmRuntimeNotice(data.ocr)}</p>}
               {findings.length > 0 && <><h4>Ghi nhận trích xuất ({findings.length})</h4><ul className="diagnostic-findings">{findings.map((finding, index) => <li key={index}><details>
@@ -264,7 +272,7 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} đơn vị`} disabled={saving} value={item.unit} maxLength={30} onChange={event => updateItem(index, 'unit', event.target.value)} placeholder="—" /> : <span>{item.unit || '—'}</span>}
             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} số lượng`} disabled={saving} type="number" min="0" step="any" value={item.quantity} onChange={event => updateItem(index, 'quantity', event.target.value)} placeholder="—" /> : <span>{item.quantity === '' ? '—' : item.quantity}</span>}
             {canEdit ? <input aria-label={`Dòng hàng ${index + 1} đơn giá`} disabled={saving} type="number" min="0" step="any" value={item.unit_price} onChange={event => updateItem(index, 'unit_price', event.target.value)} placeholder="—" /> : <span className="line-item-money">{moneyOrDash(item.unit_price)}</span>}
-            {canEdit ? <input aria-label={`Dòng hàng ${index + 1} thành tiền`} disabled={saving} type="number" min="0" step="any" value={item.amount} onChange={event => updateItem(index, 'amount', event.target.value)} placeholder="Bắt buộc" /> : <span className="line-item-money">{moneyOrDash(item.amount)}</span>}
+            {canEdit ? <input aria-label={`Dòng hàng ${index + 1} thành tiền`} disabled={saving} type="number" min="0" step="any" value={item.amount} onChange={event => updateItem(index, 'amount', event.target.value)} placeholder="—" /> : <span className="line-item-money">{moneyOrDash(item.amount)}</span>}
             {canEdit && <button type="button" className="iconbtn" disabled={saving} aria-label={`Xóa dòng hàng ${index + 1}`} onClick={() => setForm(current => ({ ...current, items: current.items.filter((_, row) => row !== index) }))}><Trash2 size={16}/></button>}
           </div>)}
         </div></div> : <div className="empty line-items-empty">Chưa có dữ liệu dòng hàng.</div>}
@@ -278,7 +286,7 @@ export default function InvoiceDetailPage({ user, id, data, busy, error, reload,
     <section className="panel action-panel">
       <div><h3>Quy trình phê duyệt</h3><p>Trạng thái kiểm tra, phê duyệt và tra cứu thuế được quản lý độc lập.</p></div>
       <div className="action-buttons">{canEdit && <button className="btn btn-primary" onClick={() => send(`/invoices/${id}/submit`)}><span>Gửi phê duyệt</span></button>}
-        {isReviewer && data.approval_status === 'pending' && <><button className="btn btn-primary" onClick={() => send(`/invoices/${id}/approval`, { action: 'approved' })}>Phê duyệt</button><input className="reason" placeholder="Lý do từ chối (bắt buộc)" value={reject} onChange={event => setReject(event.target.value)}/><button className="btn btn-outline" onClick={() => send(`/invoices/${id}/approval`, { action: 'rejected', reason: reject })}>Từ chối</button></>}</div>
+        {isReviewer && data.approval_status === 'pending' && <><button className="btn btn-primary" onClick={() => send(`/invoices/${id}/approval`, { action: 'approved', reason: reject || null })}>Phê duyệt</button><input className="reason" placeholder="Ghi chú quyết định (bắt buộc khi từ chối)" value={reject} onChange={event => setReject(event.target.value)}/><button className="btn btn-outline" onClick={() => send(`/invoices/${id}/approval`, { action: 'rejected', reason: reject })}>Từ chối</button></>}</div>
       {isReviewer && <div className="lookup"><h3>Tra cứu thuế bán thủ công</h3>
         {data.document_type === 'einvoice' ? <><p>Đối chiếu số hóa đơn, ký hiệu, ngày lập, nhà cung cấp, mã số thuế và tổng tiền ở trên với cổng tra cứu chính thức. Hệ thống không tự động thu thập dữ liệu từ cổng và không chứng nhận tính hợp pháp. Nếu cổng không khả dụng, hãy giữ nguyên trạng thái và thử lại sau.</p><div className="action-buttons"><a className="btn btn-muted" href="https://hoadondientu.gdt.gov.vn/" target="_blank" rel="noopener noreferrer">Mở cổng tra cứu thuế<ExternalLink size={15}/></a><select aria-label="Kết quả tra cứu thủ công" value={lookup} onChange={event => setLookup(event.target.value)}><option value="">Chọn kết quả sau khi đối chiếu</option><option value="verified">Đã xác minh</option><option value="mismatch">Không khớp</option><option value="not_found">Không tìm thấy</option></select><input aria-label="Ghi chú tra cứu" placeholder="Ghi chú đối chiếu (không bắt buộc)" value={lookupNote} onChange={event => setLookupNote(event.target.value)}/><button className="btn btn-primary" disabled={!lookup} onClick={() => send(`/invoices/${id}/lookup`, { result: lookup, note: lookupNote.trim() || null })}>Lưu kết quả tra cứu</button></div></> : data.document_type === 'bill' ? <p>Chứng từ này không thuộc diện tra cứu trên cổng thuế; kế toán tiếp tục kiểm tra thủ công.</p> : <p>Chưa xác định được loại chứng từ. Chưa thể thực hiện tra cứu; hãy kiểm tra chứng từ gốc và phân loại trước khi ghi nhận kết quả.</p>}
       </div>}

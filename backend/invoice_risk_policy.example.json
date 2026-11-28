@@ -1,0 +1,18 @@
+{
+  "version": "advisory-risk-v1",
+  "weights": {
+    "exact_duplicate": 40,
+    "suspected_duplicate": 20,
+    "tax_mismatch": 25,
+    "tax_partial": 10,
+    "financial_mismatch": 30,
+    "future_date": 15,
+    "ocr_conflict": 15,
+    "low_confidence": 10,
+    "spending_outlier": 15
+  },
+  "medium": 25,
+  "high": 60,
+  "minimum_history": 20,
+  "outlier_multiplier": 6
+}
