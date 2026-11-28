@@ -1,5 +1,8 @@
-import TravelAdvancesPage from './TravelAdvancesPage';
-import './travelAdvances.css';
+import {SLABadge, SLAOverview} from './ApprovalSLA.jsx';
+import ChatToolResult from './ChatToolResult.jsx';
+import {InvoiceVerificationPanel} from './InvoiceVerificationReport.jsx';
+import TaxVerificationCard from './TaxVerificationCard.jsx';
+import FinancePage,{FinancialAnalysisCard} from './FinancePage.jsx';
 import PeriodFilter from './PeriodFilter';
 import {currentPeriod, periodQuery, validPeriod} from './periodFilters';
 import BrandLogo,{BrandMark} from './BrandLogo.jsx';
@@ -23,6 +26,12 @@ import { getQuickDateRange } from './reportDateRanges';
 import {reportQueries} from './reportQueries.js';
 import './profile.css';
 import { formatNotificationTimestamp, markAllNotificationsReadAfterSuccess, markNotificationReadAfterSuccess, notificationTypeLabel, openNotificationAfterAccessCheck, unreadNotificationCount } from './notificationState';
+import {
+  FileUp as UploadIcon,
+  ScanText as ExtractIcon,
+  ClipboardCheck as ReviewIcon,
+  ArrowRight as FlowArrow
+} from 'lucide-react';
 
 function useLoad(path,{allPages=false}={}){
  const [data,setData]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[version,setVersion]=useState(0);
@@ -92,8 +101,8 @@ return <div className="login-wrap"><div className="login-aside"><div className="
   </div>
 </div></div></div><div className="login-pane"><div className="login-box"><div className="logo-circle fintech-login-mark" aria-label="FINTECH"><BrandMark/></div><small className="eyebrow">CHÀO MỪNG BẠN TRỞ LẠI</small><h2>Đăng nhập</h2><p>Truy cập không gian làm việc FINTECH OCR</p><form onSubmit={submit} className="stack" autoComplete="off"><label>Địa chỉ email<input type="email" name="login-email" autoComplete="off" autoCapitalize="none" spellCheck={false} value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Mật khẩu<input type="password" name="login-password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<p className="error">{error}</p>}<button className="btn btn-primary full" disabled={loading}>{loading?"Đang đăng nhập...":"Đăng nhập vào hệ thống"} <ArrowRight size={17}/></button></form></div></div></div>}
 const messageNavItem=['/messages',"Tin nhắn",MessageSquare];
-const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
-function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/travel-advances',"Tạm ứng & Quyết toán",ClipboardCheck],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký hoạt động",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
+const common=[['/',"Tổng quan",Home],['/invoices',"Danh sách hóa đơn",FileText],['/upload',"Tải hóa đơn lên",FileUp],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];
+function navItems(role){if(role==='employee')return common;if(role==='accountant')return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]];return [['/',"Tổng quan",Home],['/approvals',"Hàng đợi phê duyệt",ClipboardCheck],['/invoices',"Tất cả hóa đơn",FileText],['/schedule',"Lịch công tác",CalendarDays],['/ranking',"Xếp hạng",Trophy],['/chat',"Trò chuyện với AI",MessageSquare],['/reports',"Báo cáo",ChartNoAxesCombined],['/users',"Quản lý người dùng",Users],['/audit',"Nhật ký hoạt động",ShieldCheck],messageNavItem,['/notifications',"Thông báo",Bell],['/profile',"Hồ sơ cá nhân",UserCircle]]}
 
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
@@ -256,7 +265,7 @@ function Shell({user,onLogout,children}) {
       <aside className={'sidebar '+(menu?'open':'')}>
         <NavLink to="/" aria-label="Trang chủ FINTECH OCR" className="brand"><BrandLogo/></NavLink>
         <span className="role-tag">{roleName(user.role)}</span>
-        <nav className="nav">{navItems(user.role).map(([to,label,Icon])=><NavLink key={to} to={to} end={to==='/'} className={({isActive})=>'nav-item '+(isActive?'active':'')}>
+        <nav className="nav">{[...navItems(user.role),['/finance','Tài chính và ngân sách',ChartNoAxesCombined]].map(([to,label,Icon])=><NavLink key={to} to={to} end={to==='/'} className={({isActive})=>'nav-item '+(isActive?'active':'')}>
           <Icon size={18}/><span>{label}</span>{label==="Thông báo"&&unread>0&&<b className="nav-count">{unread}</b>}
         </NavLink>)}</nav>
         <div className="sidebar-bottom"><div className="system"><span className="system-dot"/>Tất cả hệ thống đang hoạt động<small>Hóa đơn của bạn được sắp xếp gọn gàng.<br/>Công việc hằng ngày trở nên đơn giản hơn.</small></div><button className="nav-item logout" onClick={onLogout}><LogOut size={18}/>Đăng xuất</button></div>
@@ -514,7 +523,7 @@ function HomePage({ user }) {
           <div className="compact-list">
             {(inv.data || []).slice(0, 5).map(invoice => <button className="compact-invoice" key={invoice.id} onClick={() => navigate('/invoices/' + invoice.id)}>
               <div><strong>{invoice.invoice_number || '#' + invoice.id}</strong><span>{invoice.seller_name || invoice.filename}</span></div>
-              <div className="compact-right"><b>{money(invoice.total_amount)}</b><Status value={invoice.approval_status}/></div>
+              <div className="compact-right"><b>{money(invoice.total_amount)}</b><Status value={invoice.approval_status}/><SLABadge sla={invoice.approval_sla}/></div>
             </button>)}
             {!inv.data?.length && <Empty/>}
           </div>
@@ -576,7 +585,7 @@ function InvoicesPage({user}){
   const {data:unsubmitted,reload:reloadUnsubmitted}=useLoad('/invoices/unsubmitted-count');
   const showUploader=['accountant','admin'].includes(user.role);const[params,setParams]=useSearchParams();const search=params.get('search')||'';const setSearch=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('search',value);else next.delete('search');return next},{replace:true});const status=['draft','pending','approved','rejected'].includes(params.get('status'))?params.get('status'):'';const draftView=status==='draft';const setStatus=value=>setParams(current=>{const next=new URLSearchParams(current);if(value)next.set('status',value);else next.delete('status');return next});const {data,busy,reload,error}=useLoad('/invoices?'+new URLSearchParams({[draftView?'unsubmitted_only':'counted_only']:'true',...invoiceDateRange(['month','year','quarter'].includes(params.get('period'))?params.get('period'):'',params.get('date_value'),params.get('quarter')||'1'),...search?{search:search.trim()}:{},...status?{approval_status:status}:{}}),{allPages:true});const n=useNavigate();let rows=(data||[]).filter(i=>(draftView||i.approval_status!=='draft')&&(!status||i.approval_status===status));return <><Title title="Hóa đơn" description="Tìm kiếm, lọc và xem dữ liệu hóa đơn."/><div className="panel">
     {(draftView||unsubmitted?.count>0)&&<UnsubmittedInvoiceNotice count={unsubmitted?.count} active={draftView} onToggle={()=>setParams(draftView?{}:{status:'draft'})}/>}
-    <div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['draft','pending','approved','rejected'].map(s=><option key={s} value={s}>{s==='draft'?unsubmittedInvoiceLabel:approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={()=>{reload();reloadUnsubmitted();}}><RefreshCw size={16}/></button></div><InvoiceDateFilter params={params} setParams={setParams}/>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th>{showUploader&&<th>Người gửi hóa đơn</th>}<th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td>{showUploader&&<td>{i.uploaded_by_name||'Không xác định'}</td>}<td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td>{draftView?<Pill type="gray">{unsubmittedInvoiceLabel}</Pill>:<Status value={i.approval_status}/>}</td><td><Status value={i.lookup_status}/></td><td><div className="invoice-message-actions">
+    <div className="filters"><label className="searchbox"><Search size={17}/><input placeholder="Tìm số hóa đơn hoặc nhà cung cấp..." value={search} onChange={e=>setSearch(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{['draft','pending','approved','rejected'].map(s=><option key={s} value={s}>{s==='draft'?unsubmittedInvoiceLabel:approvalName(s)}</option>)}</select><button className="btn btn-muted" onClick={()=>{reload();reloadUnsubmitted();}}><RefreshCw size={16}/></button></div><InvoiceDateFilter params={params} setParams={setParams}/>{busy?<Loading/>:error?<p className="error">{error}</p>:<div className="table-scroll"><table><thead><tr><th>Hóa đơn</th><th>Nhà cung cấp</th>{showUploader&&<th>Người gửi hóa đơn</th>}<th>Ngày</th><th>Số tiền</th><th>Kiểm tra dữ liệu</th><th>Phê duyệt</th><th>Tra cứu thuế</th><th></th></tr></thead><tbody>{rows.map(i=><tr key={i.id}><td><strong>{i.invoice_number||'#'+i.id}</strong><small>{documentTypeName(i.document_type)}</small></td><td>{i.seller_name||'Chưa trích xuất'}</td>{showUploader&&<td>{i.uploaded_by_name||'Không xác định'}</td>}<td>{datefmt(i.invoice_date)}</td><td className="money">{money(i.total_amount)}</td><td><Status value={i.validation_status}/></td><td>{draftView?<Pill type="gray">{unsubmittedInvoiceLabel}</Pill>:<Status value={i.approval_status}/>}<SLABadge sla={i.approval_sla}/></td><td><Status value={i.lookup_status}/></td><td><div className="invoice-message-actions">
   {showUploader && i.uploaded_by_name && i.uploaded_by!==user.id && (
     <button className="btn btn-small btn-outline" aria-label={'Nhắn tin với '+i.uploaded_by_name} title={'Nhắn tin với '+i.uploaded_by_name} onClick={()=>n('/messages?recipient='+i.uploaded_by)}>
       <MessageSquare size={17}/>
@@ -587,8 +596,8 @@ function InvoicesPage({user}){
   </button>
 </div></td></tr>)}</tbody></table>{!rows.length&&<Empty label="Không có hóa đơn phù hợp"/>}</div>}</div></>}
 const RISK_LABELS={
-  'DUPLICATE-FILE':'Trùng nội dung file',
-  'DUPLICATE-INVOICE':'Trùng thông tin hóa đơn',
+  'DUPLICATE-FILE':'Tệp này đã được tải lên trước đây',
+  'DUPLICATE-INVOICE':'Phát hiện hóa đơn có thông tin trùng',
   'SAME-TAX-CODE':'MST người mua và người bán giống nhau',
   'INCOMPLETE-FINANCIAL':'Thiếu dữ liệu tài chính',
   'INCOMPLETE-FINANCIALS':'Thiếu dữ liệu tài chính',
@@ -639,9 +648,20 @@ function RiskAssessmentPanel({invoiceId}){
      <>
        {flags.length?<div className="risk-list">{flags.map((flag,index)=>{
          const severity=flag.severity==='error'?'error':flag.severity==='warning'?'warning':'info';
+         const duplicateFile=flag.code==='DUPLICATE-FILE';
+         const duplicateInvoice=flag.code==='DUPLICATE-INVOICE';
+         const duplicate=duplicateFile||duplicateInvoice;
          return <div className={'risk-flag risk-flag-'+severity} key={(flag.code||'flag')+'-'+index}>
            <span className="risk-flag-icon"><AlertTriangle size={17}/></span>
-           <div className="risk-flag-body"><div className="risk-flag-title"><strong>{RISK_LABELS[flag.code]||flag.code||'Cảnh báo rủi ro'}</strong><span className="risk-flag-code">{flag.code||'RISK'}</span></div><p>{flag.message||'Cần kiểm tra thông tin hóa đơn.'}</p>{Number.isInteger(flag.matched_count)&&flag.matched_count>0&&<small>{flag.matched_count} bản ghi khớp được phát hiện</small>}</div>
+           <div className="risk-flag-body">
+             <div className="risk-flag-title"><strong>{RISK_LABELS[flag.code]||flag.code||'Cảnh báo rủi ro'}</strong>{!duplicate&&<span className="risk-flag-code">{flag.code||'RISK'}</span>}</div>
+             <p>{duplicateFile?'Nội dung tệp khớp với dữ liệu đã tải lên.':duplicateInvoice?'Trùng MST người bán, ký hiệu, số hóa đơn và ngày lập.':flag.message||'Cần kiểm tra thông tin hóa đơn.'}</p>
+             {duplicate?<details className="risk-flag-details"><summary>Chi tiết</summary>
+               <code>{flag.code}</code><p>{flag.message}</p>
+               {Number.isInteger(flag.matched_count)&&flag.matched_count>0&&<small>{flag.matched_count} bản ghi khớp do hệ thống trả về</small>}
+               <p>API không cung cấp mã bản ghi liên quan.{duplicateInvoice?' Cảnh báo này không xác nhận nội dung tệp khác nhau; cần đối chiếu chứng từ.':''}</p>
+             </details>:Number.isInteger(flag.matched_count)&&flag.matched_count>0&&<small>{flag.matched_count} bản ghi khớp được phát hiện</small>}
+           </div>
          </div>
        })}</div>:<div className="risk-clear"><CheckCircle2 size={19}/><span>Chưa phát hiện dấu hiệu rủi ro theo các quy tắc hiện tại. Vẫn cần đối chiếu hóa đơn gốc.</span></div>}
        <div className="risk-footer">
@@ -673,19 +693,31 @@ function DetailPage({user}){
 function ApprovalsPage({user}){
   const {data,busy,error}=useLoad('/invoices',{allPages:true});
   const [filter,setFilter]=useState('pending');
+  const [riskFilter,setRiskFilter]=useState('');
+  const [riskSort,setRiskSort]=useState(false);
+  const [slaData,setSlaData]=useState(null),[slaFilter,setSlaFilter]=useState(''),[slaSort,setSlaSort]=useState('');
+  const {data:riskData}=useLoad('/approvals/risk-summary');
+  const riskFor=invoice=>riskData?.invoices?.[invoice.id]||{level:'insufficient_data',score:null};
   const navigate=useNavigate();
   const invoices=data||[];
-  const rows=invoices.filter(invoice=>!filter||invoice.approval_status===filter);
+  const slaFor=invoice=>slaData?.invoices?.[invoice.id]||invoice.approval_sla;
+  const rows=invoices.filter(invoice=>(!filter||invoice.approval_status===filter)&&(!riskFilter||riskFor(invoice).level===riskFilter)&&(!slaFilter||(slaFilter==='unknown'?(!slaFor(invoice)||slaFor(invoice).status==='unknown'):slaFor(invoice)?.status===slaFilter)));
+  if(slaSort)rows.sort((a,b)=>{const x=slaFor(a),y=slaFor(b);if(!x)return 1;if(!y)return -1;const rank={overdue:0,due_soon:1,in_time:2,approved:3,rejected:4,unknown:5};return (slaSort==='urgent'?rank[x.status]-rank[y.status]:0)||new Date(x.due_at)-new Date(y.due_at);});
+  if(riskSort&&!slaSort)rows.sort((a,b)=>({high:3,medium:2,insufficient_data:1,low:0}[riskFor(b).level]??1)-({high:3,medium:2,insufficient_data:1,low:0}[riskFor(a).level]??1)||(riskFor(b).score??-1)-(riskFor(a).score??-1));
   const tabs=[['pending','Chờ xử lý'],['approved','Đã phê duyệt'],['rejected','Đã từ chối'],['','Tất cả']];
   return <>
     <Title title="Hàng đợi phê duyệt" description="Xem chi tiết hóa đơn, ghi nhận kết quả tra cứu thuế và xử lý phê duyệt."/>
+    <SLAOverview user={user} onChange={setSlaData} filter={slaFilter} onFilter={setSlaFilter} sort={slaSort} onSort={setSlaSort}/>
     <section className="panel">
+      <div className="filters"><select aria-label="Lọc rủi ro" value={riskFilter} onChange={e=>setRiskFilter(e.target.value)}><option value="">Tất cả mức rủi ro</option><option value="high">Cao</option><option value="medium">Trung bình</option><option value="low">Thấp</option><option value="insufficient_data">Chưa đủ dữ liệu</option></select><label><input type="checkbox" checked={riskSort} onChange={e=>setRiskSort(e.target.checked)}/> Ưu tiên rủi ro cao</label></div>
       <div className="tabs">{tabs.map(([value,name])=><button className={filter===value?'selected':''} key={name} onClick={()=>setFilter(value)}>
         {name} <b>{invoices.filter(i=>!value||i.approval_status===value).length}</b>
       </button>)}</div>
       {busy?<Loading/>:error?<p className="error">{error}</p>:<div className="approval-cards">
         {rows.map(invoice=><div className="approval-card" key={invoice.id}>
           <div>
+            <p>Đánh giá rủi ro đã lưu: {({high:'Cao',medium:'Trung bình',low:'Thấp',insufficient_data:'Chưa đủ dữ liệu'})[riskFor(invoice).level]||'Chưa đánh giá'} {riskFor(invoice).score==null?"":`${riskFor(invoice).score}/100 điểm quy tắc`}</p>
+            <InvoiceVerificationPanel invoiceId={invoice.id}/>
             <small>{documentTypeName(invoice.document_type)} · HÓA ĐƠN #{invoice.id}</small>
             <h3>{invoice.seller_name||invoice.filename}</h3>
             <p>{invoice.invoice_number||'Hóa đơn mới'} · {datefmt(invoice.invoice_date)}</p>
@@ -726,16 +758,35 @@ function InvoiceMessagesPage({id,user}){
   const path=direct?'/messages':'/invoices/'+id+'/messages';
   const {data,busy,error,reload}=useLoad(path);
   const navigate=useNavigate();
-  const [peerId,setPeerId]=useState(params.get('recipient')||'');
+  const requestedPeerId=params.get('recipient')||'';
+  const [peerId,setPeerId]=useState(requestedPeerId);
   const [peerQuery,setPeerQuery]=useState('');
   const [body,setBody]=useState('');
   const [sending,setSending]=useState(false);
   const [sendError,setSendError]=useState('');
   const messageList=useRef(null);
+
+  useEffect(()=>{
+    setPeerId(requestedPeerId);
+    setBody('');
+    setSendError('');
+  },[requestedPeerId]);
+
+  useEffect(()=>{
+    if(busy) return;
+    const messageRefreshTimer=setTimeout(reload,3000);
+    return ()=>clearTimeout(messageRefreshTimer);
+  },[busy,reload]);
+
   const latest=data?.messages.at(-1);
   const latestPeerId=latest?.sender_id===user.id?latest.recipient_id:latest?.sender_id;
   const peer=data?.peers.find(item=>String(item.id)===peerId)||
     data?.peers.find(item=>item.id===latestPeerId)||data?.peers[0];
+
+  useEffect(()=>{
+    if(!peerId&&peer) setPeerId(String(peer.id));
+  },[peerId,peer?.id]);
+
   const visiblePeers=direct?(data?.peers??[])
     .filter(item=>matchesWorkspaceText(peerQuery,item.name))
     .map(item=>({item,givenName:item.name.trim().split(/\s+/).at(-1)}))
@@ -934,10 +985,13 @@ function ChatPage({user}){
     const file=e.target.files?.[0];
     if(!file)return;
     try{
-      const compressed=await compressImage(file);
+      if(file.size>20*1024*1024 || !/\.(pdf|jpe?g|png|xml)$/i.test(file.name))throw new Error('Unsupported file or size');
+      const compressed=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const ext=file.name.split('.').pop().toLowerCase();const mime=({pdf:'application/pdf',xml:'application/xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'})[ext];resolve(String(reader.result).replace(/^data:[^;]*;/,'data:'+mime+';'));};reader.onerror=reject;reader.readAsDataURL(file);});
       setAttachedImage(compressed);
+      void submitWithText('',compressed);
     }catch(err){
       console.error('Lỗi nén ảnh:',err);
+      setMessages(current=>[...current,{role:'assistant',content:'Không đọc được tệp. Hãy chọn PDF, JPG, PNG hoặc XML tối đa 20 MB.'}]);
     }finally{
       if(fileInputRef.current)fileInputRef.current.value='';
     }
@@ -1017,6 +1071,8 @@ function ChatPage({user}){
     setAttachedImage(null);
   }
 
+  useEffect(()=>{const id=params.get('conversation');if(id && /^[1-9][0-9]*$/.test(id))void selectConversation({id:Number(id)});},[params]);
+
   async function selectConversation(conv){
     if(sending||conv.id===conversationId||historyBusy)return;
     setHistoryBusy(true);
@@ -1026,7 +1082,7 @@ function ChatPage({user}){
       setConversationId(detail.id);
       setActiveTitle(detail.title);
       setActiveDate(formatChatDate(detail.created_at));
-      setMessages(detail.messages.map(m=>({role:m.role,content:m.content,image:m.image||null})));
+      setMessages(detail.messages.map(m=>({role:m.role,content:m.content,image:m.image||null,meta:m.meta||null})));
     }catch(error){setHistoryError(error.message)}
     finally{setHistoryBusy(false)}
   }
@@ -1063,11 +1119,11 @@ function ChatPage({user}){
     setFeedback(prev=>({...prev,[idx]:prev[idx]===type?null:type}));
   }
 
-  async function submitWithText(rawText){
+  async function submitWithText(rawText,selectedAttachment=attachedImage){
     const q=(rawText||'').trim();
-    if((!q&&!attachedImage)||sendingRef.current)return;
+    if((!q&&!selectedAttachment)||sendingRef.current)return;
     sendingRef.current=true;
-    const currentImg=attachedImage;
+    const currentImg=selectedAttachment;
     setAttachedImage(null);
     setQuestion('');
     setMessages(x=>[...x,{role:'user',content:q,image:currentImg}]);
@@ -1171,7 +1227,7 @@ function ChatPage({user}){
           if(conversationId)fallbackBody.conversation_id=conversationId;
           const r=await api('/chatbot/ask',{method:'POST',body:fallbackBody});
           if(r.conversation_id)setConversationId(r.conversation_id);
-          setMessages(x=>[...x,{role:'assistant',content:r.answer,meta:{total_time_ms:r.total_time_ms,ttft_ms:r.llm_time_ms,db_time_ms:r.db_time_ms,kind:r.kind}}]);
+          setMessages(x=>[...x,{role:'assistant',content:r.answer,meta:{...r,total_time_ms:r.total_time_ms,ttft_ms:r.llm_time_ms,db_time_ms:r.db_time_ms,kind:r.kind}}]);
           if(r.gemini_connected===true)setConnection({connected:true,state:'connected',model:r.model});
           fetchConversations();
         }catch(askErr){
@@ -1312,7 +1368,7 @@ function ChatPage({user}){
               return (
                 <div className="chat-row-user" key={i}>
                   <div className="chat-bubble-user">
-                    {m.image&&(
+                    {m.image?.startsWith('data:image/')&&(
                       <div className="chat-user-img-box">
                         <img src={m.image} alt="Ảnh đính kèm" onClick={()=>window.open(m.image,'_blank')} title="Nhấn để xem ảnh phóng to"/>
                       </div>
@@ -1343,6 +1399,9 @@ function ChatPage({user}){
 
                 <div className="chat-assistant-body">
                   <ChatMarkdown>{m.content}</ChatMarkdown>
+                  {m.meta?.tax_verification && <TaxVerificationCard result={m.meta.tax_verification} llmStatus={m.meta.llm_status}/>}
+                  {m.meta?.finance_analysis && <FinancialAnalysisCard data={m.meta.finance_analysis}/>}
+                  {m.meta && <ChatToolResult meta={m.meta}/>}
                 </div>
 
                 {(internalSources.length>0||webSources.length>0)&&(
@@ -1378,8 +1437,8 @@ function ChatPage({user}){
                   <div>
                     {m.meta?(
                       <span>
-                        ⚡ {(m.meta.total_time_ms/1000).toFixed(2)}s
-                        {m.meta.ttft_ms!=null&&` · Phản hồi đầu: ${(m.meta.ttft_ms/1000).toFixed(2)}s`}
+                        ⚡ {Number.isFinite(m.meta.total_time_ms)?`${(m.meta.total_time_ms/1000).toFixed(2)}s`:'Chưa ghi nhận thời gian'}
+                        {Number.isFinite(m.meta.ttft_ms)&&` · Phản hồi đầu: ${(m.meta.ttft_ms/1000).toFixed(2)}s`}
                         {m.meta.db_time_ms>0&&` · CSDL: ${m.meta.db_time_ms}ms`}
                         {m.meta.kind&&` · ${m.meta.kind==='ordinary'?'Kiến thức phổ thông':m.meta.kind==='security'?'Từ chối bảo mật':m.meta.kind==='analysis'?'Phân tích':'Nghiệp vụ'}`}
                       </span>
@@ -1453,7 +1512,7 @@ function ChatPage({user}){
             {attachedImage&&(
               <div className="chat-img-preview-container">
                 <div className="chat-img-preview-card">
-                  <img src={attachedImage} alt="Xem trước ảnh đính kèm"/>
+                  {!attachedImage.startsWith('data:image/') && <span>Document</span>}<img hidden={!attachedImage.startsWith('data:image/')} src={attachedImage} alt="Xem trước ảnh đính kèm"/>
                   <button
                     type="button"
                     className="chat-img-remove-btn"
@@ -1493,7 +1552,7 @@ function ChatPage({user}){
                 <input
                   type="file"
                   ref={fileInputRef}
-                  accept="image/*"
+                  accept="application/pdf,application/xml,text/xml,image/jpeg,image/png,.xml"
                   style={{display:'none'}}
                   onChange={handleFileChange}
                 />
@@ -1996,9 +2055,9 @@ export default function App(){
       <Route path="/upload" element={user.role==='employee'?<UploadPage/>:<Navigate to="/invoices"/>}/>
       <Route path="/approvals" element={user.role!=='employee'?<ApprovalsPage user={user}/>:<Navigate to="/"/>}/>
       <Route path="/schedule" element={<SchedulePage user={user}/>}/>
-      <Route path="/travel-advances" element={<TravelAdvancesPage key={user.id} user={user}/>}/>
       <Route path="/ranking" element={<RankingPage/>}/>
       <Route path="/chat" element={<ChatPage key={user.id} user={user}/>}/>
+      <Route path="/finance" element={<FinancePage user={user}/>}/>
       <Route path="/reports" element={user.role!=='employee'?<ReportsPage/>:<Navigate to="/"/>}/>
       <Route path="/users" element={user.role==='admin'?<UsersPage/>:<Navigate to="/"/>}/>
       <Route path="/audit" element={user.role==='admin'?<AuditPage/>:<Navigate to="/"/>}/>

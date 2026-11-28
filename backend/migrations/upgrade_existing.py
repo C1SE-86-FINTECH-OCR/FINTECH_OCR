@@ -20,7 +20,7 @@ def upgrade(connection):
         raise RuntimeError("Existing base schema required; missing tables: " + ", ".join(sorted(missing)))
 
     from app.models import DirectMessage, InvoiceMessage
-    from app.travel_models import TravelAdvance, TravelAdvanceEvent, TravelExpense, TravelPayment, TravelPaymentEvidence
+    from app.approval_sla import SLAPolicy, SLACycle, SLANotice
 
     results = {
         "profile": upgrade_profile(connection),
@@ -28,17 +28,16 @@ def upgrade(connection):
         "schedule_notes": upgrade_schedule_notes(connection),
         "schedule_compat": upgrade_schedule_compat(connection),
     }
-    for model in (InvoiceMessage, DirectMessage):
+    for model in (InvoiceMessage, DirectMessage, SLAPolicy, SLACycle, SLANotice):
         table = model.__table__
         existed = inspect(connection).has_table(table.name)
         table.create(connection, checkfirst=True)
         results[table.name] = "already current" if existed else "created"
     if {"conversations", "chat_messages", "users"} <= set(inspect(connection).get_table_names()):
         results["chat_history"] = upgrade_chat_history(connection)
-    if inspect(connection).has_table("invoices"):
-        for model in (TravelAdvance, TravelExpense, TravelPayment, TravelAdvanceEvent, TravelPaymentEvidence):
-            model.__table__.create(connection, checkfirst=True)
-        results["travel_advances"] = "ready"
+    from migrations.finance_v1 import upgrade_connection as upgrade_finance
+    upgrade_finance(connection)
+    results['finance'] = 'additive schema current'
     results["ranking_demo"] = upgrade_ranking_demo(connection)
     return results
 

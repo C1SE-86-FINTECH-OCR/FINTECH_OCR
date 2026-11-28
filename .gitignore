@@ -253,3 +253,24 @@ test_uploads/
 # Secrets
 *.pem
 *.key
+
+# SQLite runtime sidecars (keep local databases and recovery data out of Git)
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+
+# Temporary editor/write files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Generated frontend coverage
+/web/coverage/
