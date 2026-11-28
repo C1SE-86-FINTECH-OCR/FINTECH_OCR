@@ -40,6 +40,7 @@ from . import gemini_chat
 from .invoice_verification import verification_report, image_fingerprint
 from . import finance
 from . import approval_sla
+from . import travel
 import asyncio
 from . import chatbot_queries
 from .tax_verification import verify_tax_code, verification_context, tax_question_code, tax_summary, document_identity
@@ -75,6 +76,7 @@ async def lifespan(app):
 app=FastAPI(title='FINTECH OCR API',version='0.1.0',lifespan=lifespan,description='API C1SE.86; Gemini cho OCR chỉ hoạt động khi được cấu hình và cho phép truyền dữ liệu; tra cứu thuế bán thủ công')
 app.add_middleware(CORSMiddleware,allow_origins=[s.strip() for s in settings.cors_origins.split(',')],allow_methods=['*'],allow_headers=['*'],allow_credentials=True)
 app.include_router(approval_sla.router)
+app.include_router(travel.router)
 
 async def local_ocr_preview_boundary(request: Request, call_next):
     if settings.ocr_local_preview_enabled:
@@ -1188,6 +1190,7 @@ async def upload_invoice_batch(files:list[UploadFile]=File(...),db:Session=Depen
 @app.put('/api/v1/invoices/{invoice_id}')
 def edit_invoice(invoice_id:int,body:UpdateInvoice,db:Session=Depends(db_session),user=Depends(require_roles('employee'))):
     i=invoice_allowed(db,user,invoice_id)
+    if travel.invoice_locked(db,invoice_id):fail('Hóa đơn đã thuộc hồ sơ quyết toán đang kiểm tra hoặc đã duyệt; không sửa dữ liệu gốc',409)
     if i.approval_status not in ('draft','rejected'):fail('Chỉ chỉnh sửa hóa đơn nháp hoặc đã bị từ chối')
     changes=body.model_dump(exclude_unset=True)
     for key,val in changes.items():
@@ -1342,7 +1345,7 @@ def notifications(db:Session=Depends(db_session),user=Depends(current_user)):
             event_type = 'direct_message'
         index+=1 if has_type else 0
         read_at=values[index] if has_read_at else None
-        result.append({'id':item.id,'title':item.title,'message':item.message,'type':event_type,'is_read':item.is_read,'invoice_id':item.invoice_id,'schedule_id':item.schedule_id,'created_at':item.created_at.isoformat() if item.created_at else None,'read_at':read_at.isoformat() if hasattr(read_at,'isoformat') else str(read_at) if read_at else None})
+        result.append({'id':item.id,'title':item.title,'message':item.message,'type':event_type,'is_read':item.is_read,'invoice_id':item.invoice_id,'schedule_id':item.schedule_id,'travel_case_id':item.travel_case_id,'created_at':item.created_at.isoformat() if item.created_at else None,'read_at':read_at.isoformat() if hasattr(read_at,'isoformat') else str(read_at) if read_at else None})
     return result
 @app.get('/api/v1/notifications/unread-count')
 def notifications_unread_count(db:Session=Depends(db_session),user=Depends(current_user)):
@@ -1505,6 +1508,7 @@ def schedule_update(schedule_id:int,body:ScheduleEdit,db:Session=Depends(db_sess
             fail('Bạn không thể chuyển giao lịch công tác cho người khác', 403)
     elif user.role != 'admin':
         fail('Không có quyền điều chỉnh lịch công tác', 403)
+    travel.check_schedule_edit(db,s.id,body.model_dump(exclude_unset=True))
     changes=body.model_dump(exclude_unset=True)
     if not changes:fail('Không có thông tin nào để cập nhật')
     if any(key in changes and changes[key] is None for key in ('title','destination','starts_at','ends_at','assigned_to')):fail('Các thông tin bắt buộc không được để trống',422)

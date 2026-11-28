@@ -15,6 +15,8 @@ from migrations.schedule_compat_v1 import upgrade as upgrade_schedule_compat
 
 
 def upgrade(connection):
+    from migrations.travel_v1 import preflight_connection
+    preflight_connection(connection)
     missing = {"users", "reports", "schedules"} - set(inspect(connection).get_table_names())
     if missing:
         raise RuntimeError("Existing base schema required; missing tables: " + ", ".join(sorted(missing)))
@@ -35,6 +37,9 @@ def upgrade(connection):
         results[table.name] = "already current" if existed else "created"
     if {"conversations", "chat_messages", "users"} <= set(inspect(connection).get_table_names()):
         results["chat_history"] = upgrade_chat_history(connection)
+    from migrations.travel_v1 import upgrade_connection
+    upgrade_connection(connection)
+    results['travel'] = 'additive schema current'
     from migrations.finance_v1 import upgrade_connection as upgrade_finance
     upgrade_finance(connection)
     results['finance'] = 'additive schema current'

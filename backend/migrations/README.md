@@ -9,14 +9,48 @@ python -m migrations.upgrade_existing
 python -m migrations.upgrade_existing --apply
 ```
 
-The first command only displays the target (password masked); run the second only after checking it. The runner reuses the existing additive Profile, Report and Schedule migrations in order, then creates missing invoice/direct message tables and applies the chat history and Finance/SLA schema changes. It does not run test-only Phase 2 migrations or reset data. A pre-existing base schema is required. For a new SQLite development database, start the API as usual.
+The first command only displays the target (password masked); run the second only after checking it. The runner reuses the existing additive Profile, Report and Schedule migrations in order, then creates missing invoice/direct message tables and applies the chat history and travel advance schema changes. It does not run test-only Phase 2 migrations or reset data. A pre-existing base schema is required. For a new SQLite development database, start the API as usual.
 
 ## Lịch sử AI và tạm ứng công tác phí
 
 Chạy `python -m migrations.upgrade_existing --apply` một lần trước khi khởi động phiên bản API mới.
 Migration bổ sung `conversations.updated_at` từ tin nhắn mới nhất, giữ nguyên hội thoại
 và ảnh cũ, tạo chỉ mục tra cứu và bảng `chat_turns` để phát hiện gửi lại cùng yêu cầu.
-Task 1 creates Finance/SLA tables and preserves existing legacy Travel tables without importing or running either Travel workflow. Task 2 must be deployed separately with its explicit legacy-data preflight. No migration runs at application startup.
+The single active Travel implementation is /travel (app.travel).
+Migrations create travel_cases, travel_expenses, travel_transactions, travel_evidence,
+travel_history, travel_sla_cycles and the Finance/SLA tables.
+Legacy tables are never dropped. Nonempty legacy Travel stops before any changes
+with LEGACY_TRAVEL_RECONCILIATION_REQUIRED: receipt confirmation and history cannot
+be inferred. An approved lossless reconciliation is required before deployment.
+Empty legacy travel_expenses is preserved in the travel_legacy_main PostgreSQL
+schema before creating the target table. Back up and test on a restored database first.
+No automatic migration is applied by application startup.
+
+### Nonempty legacy main Travel: deployment remains blocked
+
+`LEGACY_TRAVEL_RECONCILIATION_REQUIRED` is an intentional safety stop, not a
+successful conversion. The transaction must roll back; continue running the
+existing application until reconciliation is approved. Do not point the new API
+at the legacy schema or manually mark the migration complete.
+
+1. Back up and restore the intended database into an isolated PostgreSQL target.
+2. Inventory every advance, expense, payment, evidence and event; retain IDs,
+   actor references, timestamps, amounts (including historical fractional VND),
+   invoice links and original status. No rounding or account changes are allowed.
+3. An authorized operator must reconcile missing receipt confirmation, ambiguous
+   rejected/cancelled states, refund evidence and conflicting invoice links.
+   No status or financial movement may be inferred from the old `disbursed` flag.
+4. Approve explicit old-to-new ID/state mappings and verify row coverage and
+   ledger totals on the restored copy before authorizing a conversion script.
+   Until that mapping exists, this release deliberately performs no conversion.
+5. Preserve legacy history in an archive schema; never DROP it. Only the new
+   `app.travel` workflow and its target `travel_expenses` may run after a verified
+   cutover. Restoring the backup is an operator decision, never an automatic reset.
+
+Fresh databases, existing databases already on the target schema, and empty
+legacy Travel are supported by the idempotent migration. Run the isolated checker
+`tools/verify_integration_postgres.py --connection-env <local-config>`, which
+creates only `fintech_integration_*` databases and tests the nonempty safety stop.
 
 ## Existing Profile, Report, and Schedule databases
 

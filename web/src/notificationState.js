@@ -40,6 +40,7 @@ export function setAllNotificationsRead(items) {
 }
 
 export function notificationTarget(notification) {
+  if(notification?.travel_case_id!=null)return {kind:'travel',path:'/travel?case='+notification.travel_case_id};
   if (notification?.type === 'direct_message') return {kind: 'message', path: '/messages'};
   if (notification?.invoice_id != null && notification.type === 'invoice_message') {
     return { kind: 'invoice', path: `/invoices/${notification.invoice_id}/messages` };
@@ -55,6 +56,7 @@ export function notificationTarget(notification) {
 
 export async function openNotificationAfterAccessCheck(notification, get, markRead, navigate) {
   const target = notificationTarget(notification);
+  if(target?.kind==='travel')await get('/travel/cases/'+notification.travel_case_id);
   if (target?.kind === 'invoice') await get(target.path);
   if (target?.kind === 'schedule') {
     const schedules = await get('/schedules');

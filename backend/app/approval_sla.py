@@ -156,6 +156,8 @@ def synchronize(db, now=None):
 def sweep():
     with SessionLocal() as db:
         synchronize(db)
+        from . import travel
+        travel.sweep(db)
         db.commit()
 
 async def worker():

@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}#root{padding:24px;margin-left:240px;min-width:0}@media(max-width:900px){#root{margin-left:0;padding:16px}}</style></head><body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+// Isolated presentation fixture: no real API, account, invoice or database writes.
+const calls=[];
+const summary={issued:'20000000.01',received:'20000000.01',accepted:'500000',refund_paid:'9500000',supplement_paid:'0',unsettled_advance:'10000000.01',open_cases:2,closed_cases:1,cases:[]};
+window.fetch=async(url,options={})=>{calls.push({url:String(url),method:options.method||'GET',body:options.body});const path=String(url);let data=path.includes('/travel/summary')?summary:path.includes('/finance/analysis')?{scope:'own',filters:{group:'month'},rows:[{label:'2026-11',currency:'VND',count:1,approved:'20000000.01',pending:'500000',vat:'100000',missing_amounts:0,missing_vat:0}],budgets:[]}:[];return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});};
+import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter} from 'react-router-dom';
+const {default:Travel,ExpenseForm}=await import('/src/TravelPage.jsx');const {default:Finance}=await import('/src/FinancePage.jsx');await import('/src/styles.css');
+const root=createRoot(document.getElementById('root')),h=React.createElement,results=[],pause=()=>new Promise(r=>setTimeout(r,150));
+for(const theme of ['light','dark'])for(const role of ['employee','accountant','admin'])for(const [page,Component] of [['travel',Travel],['finance',Finance]]){
+ document.documentElement.dataset.theme=theme;root.render(h(MemoryRouter,{key:theme+role+page},h(Component,{user:{id:3,role,full_name:'UI Fixture'}})));await pause();
+ const amounts=[...document.querySelectorAll('.fitted-financial-value')];const fits=amounts.length>0&&amounts.every(e=>e.scrollWidth<=e.clientWidth+1&&getComputedStyle(e).whiteSpace==='nowrap');
+ const controls=[...document.querySelectorAll('.travel-filters select')],button=document.querySelector('.travel-reload');
+ const aligned=!button||innerWidth<620||controls.slice(0,2).every(e=>Math.abs(e.getBoundingClientRect().bottom-button.getBoundingClientRect().bottom)<2);
+ results.push({page,role,theme,width:innerWidth,amountsFit:fits,reloadAligned:aligned,noPageOverflow:document.documentElement.scrollWidth<=innerWidth+1});
+}
+const expense={id:9,invoice_id:null,description:'UI fixture only',category:'travel',occurred_on:'2020-01-01',quantity:'4.0000',unit_price:'50000.0000',amount:'200000.00',purpose:'Test only',no_invoice_reason:'Fixture'},c={id:7,expenses:[expense]};
+let saved=0,cancelled=0;const renderEdit=(record,key)=>root.render(h('div',{className:'travel-page'},h('section',{className:'travel-edit-panel'},h(ExpenseForm,{key,c,expense:record,onSaved:()=>saved++,onCancel:()=>cancelled++}))));
+renderEdit(expense,'initial');await pause();
+let numbers=[...document.querySelectorAll('input[inputmode="decimal"]')];
+const initial=numbers.map(e=>e.value),focused=[];
+for(const input of numbers){input.focus();await pause();focused.push(input.value);input.blur();await pause();}
+const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+numbers[0].focus();set.call(numbers[0],'5');numbers[0].dispatchEvent(new Event('input',{bubbles:true}));await pause();numbers[0].blur();await pause();
+numbers=[...document.querySelectorAll('input[inputmode="decimal"]')];const updated=numbers.map(e=>e.value);
+document.querySelector('form').requestSubmit();await pause();
+const write=calls.findLast(c=>c.method==='PUT'),payload=write?JSON.parse(write.body):null;
+if(payload){renderEdit({...expense,...payload},'reopen');await pause();}
+const reopened=[...document.querySelectorAll('input[inputmode="decimal"]')].map(e=>e.value);
+document.querySelector('button[type="button"]')?.click();await pause();
+const edit={initial,focused,updated,reopened,saved,cancelled,passed:initial.join('|')==='4|50.000|200.000'&&focused.join('|')===initial.join('|')&&updated.join('|')==='5|50.000|250.000'&&payload?.amount==='250000'&&reopened.join('|')===updated.join('|')&&saved===1&&cancelled===2};
+document.getElementById('result').textContent=JSON.stringify({fixtureOnly:true,results,edit,allPassed:results.every(r=>r.amountsFit&&r.reloadAligned&&r.noPageOverflow)&&edit.passed,mockWrites:calls.filter(c=>c.method!=='GET').length,realApiRequests:0});
+</script></body></html>
